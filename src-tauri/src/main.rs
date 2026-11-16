@@ -7,6 +7,7 @@ mod game_detector;
 mod game_icons;
 mod game_tracking;
 mod model;
+mod updates;
 
 use actions::Action;
 use model::{ActivitySummary, Data, Game, GameSession, Session, Settings, Statistics, Timestamp};
@@ -445,6 +446,7 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_autostart::Builder::new()
                 .arg("--background")
@@ -464,6 +466,7 @@ fn main() {
                 .as_ref()
                 .map(|session| session.running.is_some());
             app.manage(Mutex::new(engine));
+            app.manage(updates::Updates::new(app.handle(), isolated));
             let open = MenuItem::with_id(app, "open", "Открыть Afterwork", true, None::<&str>)?;
             let timer =
                 MenuItem::with_id(app, "timer", "Нет активной сессии", false, None::<&str>)?;
@@ -495,7 +498,7 @@ fn main() {
                     }
                     "quit" => {
                         if let Ok(mut engine) = app.state::<Mutex<Engine>>().lock() {
-                            engine.checkpoint_games(model::now());
+                            let _ = engine.checkpoint_games(model::now());
                         }
                         app.exit(0);
                     }
@@ -525,6 +528,7 @@ fn main() {
             if !std::env::args_os().any(|arg| arg == "--background") {
                 show(app.handle());
             }
+            updates::start_check(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -537,6 +541,11 @@ fn main() {
             snapshot,
             apply,
             autostart,
+            updates::update_status,
+            updates::set_auto_update,
+            updates::check_update,
+            updates::download_update,
+            updates::install_update,
             game_icons::game_icon,
             game_icons::set_game_icon
         ])
@@ -579,10 +588,22 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
         let rollover = model::boundary(date, 360);
         let mut engine = Engine::load(dir.path().to_owned()).unwrap();
+        assert!(engine.data.auto_update);
+        engine
+            .update(|data| {
+                data.auto_update = false;
+                Ok(())
+            })
+            .unwrap();
         engine
             .update(|data| actions::apply(data, Action::Start { activity: 7 }, rollover - 60))
             .unwrap();
         let mut reopened = Engine::load(dir.path().to_owned()).unwrap();
+        assert!(!reopened.data.auto_update);
+        assert_eq!(
+            reopened.data.active.as_ref().unwrap().running,
+            Some(rollover - 60)
+        );
         reopened
             .update(|data| {
                 actions::apply(

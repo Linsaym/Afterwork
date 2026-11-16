@@ -190,6 +190,8 @@ impl Session {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Data {
     pub settings: Settings,
+    #[serde(default = "default_auto_update")]
+    pub auto_update: bool,
     pub activities: Vec<Activity>,
     pub games: Vec<Game>,
     #[serde(default)]
@@ -206,10 +208,15 @@ pub struct Data {
     pub next_id: u64,
 }
 
+fn default_auto_update() -> bool {
+    true
+}
+
 impl Default for Data {
     fn default() -> Self {
         Self {
             settings: Settings::default(),
+            auto_update: default_auto_update(),
             activities: [
                 ("Работа", ActivityIcon::Briefcase, ActivityColor::Violet),
                 ("Учёба", ActivityIcon::Book, ActivityColor::Blue),

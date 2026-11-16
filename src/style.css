@@ -127,6 +127,12 @@ main { flex: 1; min-width: 0; overflow: auto; background: radial-gradient(ellips
 .info-line { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; margin-top: 16px; line-height: 1.55; }
 .info-line svg { flex: 0 0 17px; color: #a891db; }
 .preferences { display: grid; gap: 14px; }
+.updates-panel { margin-top: 14px; }
+.update-controls { display: grid; gap: 10px; margin-top: 14px; }
+.update-controls p { margin: 0; }
+.update-controls progress { width: 100%; accent-color: #a795ff; }
+.update-buttons, .update-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.update-banner { justify-content: space-between; padding: 10px clamp(22px, 4vw, 64px); background: #221d32; }
 .settings-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
 .field { display: grid; gap: 7px; color: #d4cce2; font-size: 12px; font-weight: 600; min-width: 0; }
 .field input, .field textarea { padding: 10px; min-width: 0; width: 100%; border-radius: 8px; border: 1px solid #363142; color: #f2edf9; background: #111119; font-weight: 450; }

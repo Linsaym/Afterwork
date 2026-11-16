@@ -1,5 +1,7 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { dateKey, type Action, type Session, type Snapshot } from './types'
+import type { UpdateStatus } from './desktop'
+import updateFixture from '../fixtures/ipc-update-status.json'
 
 const gamePath = 'C:/Demo/Game.exe'
 const now = () => Math.floor(Date.now() / 1000)
@@ -9,6 +11,37 @@ export function installPreview() {
   const started = now() - 900
   let nextId = 10
   let autostart = false
+  const updatePreview = scenario === 'update' || scenario === 'update-offline'
+  const updates: UpdateStatus = {
+    ...updateFixture, phase: updatePreview ? 'checking' : 'disabled', version: null, received: 0, total: null,
+  }
+  function download() {
+    if (updates.phase !== 'available') return
+    updates.phase = 'downloading'
+    updates.total = updateFixture.total
+    const progress = window.setInterval(() => {
+      updates.received += 128
+      if (updates.received === updates.total) {
+        window.clearInterval(progress)
+        updates.phase = 'ready'
+      }
+    }, 300)
+  }
+  function check() {
+    updates.phase = 'checking'
+    updates.error = null
+    window.setTimeout(() => {
+      if (scenario === 'update-offline') {
+        updates.phase = 'idle'
+        updates.error = 'Не удалось проверить обновления. Проверьте подключение к интернету и доступность GitHub Releases.'
+      } else {
+        updates.phase = 'available'
+        updates.version = updateFixture.version
+        if (updates.autoUpdate) download()
+      }
+    }, 1200)
+  }
+  if (updatePreview) check()
   const history: Session[] = []
   const data: Snapshot = {
     date: dateKey(new Date()), seconds: 0, phase: 1, target: 2700, locked: true,
@@ -28,7 +61,7 @@ export function installPreview() {
   if (scenario === 'demo' || scenario === 'locked' || scenario === 'error') {
     data.games.push({ path: gamePath, name: 'Тестовая игра', source: 'Steam', catalog_id: 'steam:1', aliases: [], excluded: false })
   }
-  if (scenario === 'demo' || scenario === 'active') {
+  if (scenario === 'demo' || scenario === 'active' || scenario === 'update') {
     data.active = { id: 5, activity: 1, started, running: started, spans: [], note: '' }
   }
   if (scenario === 'error') data.failures[gamePath] = 'Файл занят другой программой. Afterwork повторит попытку.'
@@ -110,6 +143,16 @@ export function installPreview() {
         } satisfies Snapshot)
       }
       case 'apply': return apply(payload?.action as Action)
+      case 'update_status': return structuredClone(updates)
+      case 'set_auto_update':
+        updates.autoUpdate = !!payload?.enabled
+        if (updates.autoUpdate) download()
+        return
+      case 'check_update': return check()
+      case 'download_update': return download()
+      case 'install_update':
+        updates.phase = 'installing'
+        return
       case 'autostart':
         if (typeof payload?.enabled === 'boolean') autostart = payload.enabled
         return autostart

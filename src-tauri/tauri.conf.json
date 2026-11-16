@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Afterwork",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "identifier": "app.afterwork.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -19,5 +19,13 @@
     "category": "Productivity",
     "icon": ["icons/icon.ico", "icons/icon.png"],
     "windows": { "nsis": { "languages": ["Russian"] } }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "requireSignedVersion": true,
+      "endpoints": ["https://github.com/Linsaym/Afterwork/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
   }
 }

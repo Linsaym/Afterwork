@@ -17,6 +17,7 @@ import { Activities, ActivityEditor, ActivityPicker } from './activities'
 import { Achievements, AchievementUnlock } from './achievements'
 import { GameIcon, Games } from './games'
 import { Statistics } from './statistics'
+import { UpdateSettings, useUpdates } from './updates'
 import { clock, dateOf, stopwatch, type Action, type Activity, type ActivityDetails, type Game, type Settings, type Snapshot } from './types'
 
 const pages = [
@@ -40,6 +41,8 @@ function App() {
   const [modal, setModal] = useState<Modal>()
   const [text, setText] = useState('')
   const [newAwards, setNewAwards] = useState<string[]>([])
+  const [updateConfirmation, setUpdateConfirmation] = useState<string>()
+  const { status: updateStatus, refresh: refreshUpdates } = useUpdates()
   const knownAwards = useRef<Set<string> | undefined>(undefined)
   const sequence = useRef(0)
   const pending = useRef(false)
@@ -126,6 +129,10 @@ function App() {
   }
 
   const win = desktop.window()
+  const runUpdate = (command: () => Promise<void>) => void perform(async () => { await command(); await refreshUpdates() })
+  const confirmUpdate = () => {
+    if (updateStatus?.phase === 'ready' && updateStatus.version) setUpdateConfirmation(updateStatus.version)
+  }
   return <div className="app">
     <header className="titlebar" data-tauri-drag-region>
       <div className="wordmark" data-tauri-drag-region><span className="logo" data-tauri-drag-region><Pulse size={17} /></span>Afterwork<span className="word-dot" /></div>
@@ -144,6 +151,10 @@ function App() {
         <div className="sidebar-bottom"><span className="online" /><span>Работает в фоне</span></div>
       </aside>
       <main>
+        {page !== 'settings' && (updateStatus?.phase === 'ready' || updateStatus?.phase === 'installing') && <div className="update-banner" role="status">
+          <span>{updateStatus.error ?? (updateStatus.phase === 'ready' ? `Afterwork ${updateStatus.version} готов к установке.` : 'Запускаем установщик Afterwork…')}</span>
+          {updateStatus.phase === 'ready' && <button className="button" disabled={busy || !!modal} onClick={confirmUpdate}>Перезапустить и установить</button>}
+        </div>}
         {!data ? <div className="loading">{error || 'Загрузка Afterwork…'}</div> : <>
           {page === 'home' && <Home data={data} busy={busy} selection={selection} select={setSelection} run={action => void perform(async () => { await apply(action) })} add={initialName => showModal({ type: 'activity', initialName, selectNew: true })} finish={() => showModal({ type: 'finish' })} games={() => setPage('games')} />}
           {page === 'activities' && <Activities activities={data.activities} summaries={data.activitySummaries} busy={busy}
@@ -160,10 +171,25 @@ function App() {
             const path = await desktop.chooseGame()
             if (typeof path === 'string') await apply({ type: 'addGame', path })
           })} />}
-          {page === 'settings' && <Preferences initial={data.settings} save={settings => void perform(async () => { await apply({ type: 'saveSettings', settings }) })} busy={busy} reportError={setError} />}
+          {page === 'settings' && <Preferences initial={data.settings} save={settings => void perform(async () => { await apply({ type: 'saveSettings', settings }) })} busy={busy} reportError={setError} updates={
+            <UpdateSettings status={updateStatus} busy={busy} check={() => runUpdate(desktop.checkUpdate)} download={() => runUpdate(desktop.downloadUpdate)} confirm={confirmUpdate}
+              toggle={<Toggle label="Автоматическое обновление" value={!!updateStatus?.autoUpdate} disabled={busy || !updateStatus || updateStatus.phase === 'disabled' || updateStatus.phase === 'installing'}
+                change={() => runUpdate(() => desktop.setAutoUpdate(!updateStatus?.autoUpdate))} />} />
+          } />}
         </>}
       </main>
     </div>
+    {updateConfirmation && <Dialog label="Установка обновления" close={() => setUpdateConfirmation(undefined)}>
+      <h2>Установить Afterwork {updateConfirmation}?</h2>
+      <p>Afterwork закроется на время установки и откроется снова. Настройки, статистика и текущая сессия сохранятся. Запущенный таймер учтёт время перезапуска.</p>
+      <div className="dialog-actions">
+        <button autoFocus className="button" onClick={() => setUpdateConfirmation(undefined)}>Позже</button>
+        <button className="button primary" disabled={busy || updateStatus?.phase !== 'ready'} onClick={() => {
+          setUpdateConfirmation(undefined)
+          runUpdate(() => desktop.installUpdate(updateConfirmation))
+        }}>Перезапустить и установить</button>
+      </div>
+    </Dialog>}
     {newAwards.length > 0 && <AchievementUnlock key={newAwards.join()} ids={newAwards} close={() => setNewAwards([])} open={() => { setPage('achievements'); setNewAwards([]) }} />}
     {error && data && !modal && <div role="alert" className="toast"><CircleAlert size={17} /><span>{error}</span><button aria-label="Закрыть сообщение" onClick={() => setError('')}><X size={16} /></button></div>}
     {modal && <Dialog close={closeModal} label={modal.type === 'activity' ? (modal.activity ? 'Редактировать занятие' : 'Новое занятие') : modal.type === 'finish' ? 'Завершение сессии' : modal.type === 'icon' ? 'Иконка игры' : 'Удалить игру?'}>
@@ -261,7 +287,7 @@ function Home({ data, busy, selection, select, run, add, finish, games }: {
   </div>
 }
 
-function Preferences({ initial, save, busy, reportError }: { initial: Settings; save: (settings: Settings) => void; busy: boolean; reportError: (error: string) => void }) {
+function Preferences({ initial, save, busy, reportError, updates }: { initial: Settings; save: (settings: Settings) => void; busy: boolean; reportError: (error: string) => void; updates: ReactNode }) {
   const [first, setFirst] = useState(clock(initial.first))
   const [second, setSecond] = useState(clock(initial.second))
   const [minutes, setMinutes] = useState(String(initial.minutes))
@@ -295,6 +321,7 @@ function Preferences({ initial, save, busy, reportError }: { initial: Settings; 
       </section>
       <div className="form-footer"><p>Запущенный секундомер учитывает время сна и перезапуска Windows.</p><button className="button primary" disabled={busy || !dirty}><Check size={17} />Сохранить настройки</button></div>
     </form>
+    {updates}
   </div>
 }
 

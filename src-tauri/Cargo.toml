@@ -1,6 +1,6 @@
 [package]
 name = "afterwork"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 
 [build-dependencies]
@@ -23,3 +23,4 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "native-tls"] }
 sha2 = "0.10"
 walkdir = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls", "zip"] }

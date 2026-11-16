@@ -190,7 +190,7 @@ impl Engine {
             || (sample.observed || !tracker.live.is_empty())
                 && (now >= tracker.checkpoint_at || now < tracker.checkpoint_at - 60)
         {
-            self.checkpoint_games(now);
+            let _ = self.checkpoint_games(now);
         }
     }
 
@@ -211,17 +211,17 @@ impl Engine {
             false
         });
         if !tracker.finished.is_empty() {
-            self.checkpoint_games(now);
+            let _ = self.checkpoint_games(now);
         }
     }
 
-    pub fn checkpoint_games(&mut self, now: Timestamp) {
+    pub fn checkpoint_games(&mut self, now: Timestamp) -> crate::CommandResult<()> {
         let tracker = &self.game_tracking;
         if tracker.live.is_empty()
             && tracker.finished.is_empty()
             && self.data.game_monitoring.is_empty()
         {
-            return;
+            return Ok(());
         }
         let sessions = tracker
             .finished
@@ -229,21 +229,18 @@ impl Engine {
             .chain(tracker.live.values())
             .cloned()
             .collect::<Vec<_>>();
-        if self
-            .update(|data| {
-                merge_sessions(&mut data.game_sessions, sessions);
-                Ok(())
-            })
-            .is_ok()
-        {
-            self.game_tracking.finished.clear();
-            self.game_tracking.checkpoint_at = now
-                + if self.game_tracking.live.is_empty() {
-                    60
-                } else {
-                    20
-                };
-        }
+        self.update(|data| {
+            merge_sessions(&mut data.game_sessions, sessions);
+            Ok(())
+        })?;
+        self.game_tracking.finished.clear();
+        self.game_tracking.checkpoint_at = now
+            + if self.game_tracking.live.is_empty() {
+                60
+            } else {
+                20
+            };
+        Ok(())
     }
 
     pub fn game_report(&self) -> Vec<GameSession> {

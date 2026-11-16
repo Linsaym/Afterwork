@@ -32,6 +32,25 @@ npm run tauri -- build
 ```
 
 Готовый бинарный файл находится в `src-tauri\target\release\afterwork.exe`, установщик — в `src-tauri\target\release\bundle\nsis`.
+
+## Выпуск обновлений
+
+Afterwork проверяет [манифест последнего выпуска](https://github.com/Linsaym/Afterwork/releases/latest/download/latest.json) при запуске. Скачанный пакет проверяется по открытому ключу и подписанной версии. Установка начинается только после подтверждения в приложении; прогресс установки показывает NSIS. Afterwork Dev и локальная сборка без открытого ключа не проверяют реальные выпуски. В браузерном превью `?scenario=update` имитирует скачивание, подтверждение и запуск установщика на фоне активной сессии, а `?scenario=update-offline` — ошибку сети.
+
+Перед первым выпуском с обновлениями один раз выпустите ключ Tauri с паролем. Храните приватный ключ и пароль в защищённой резервной копии: установленные версии доверяют этому ключу и не примут подпись от нового.
+
+```powershell
+npm run tauri -- signer generate --write-keys "$env:USERPROFILE\.tauri\afterwork.key"
+```
+
+В настройках GitHub **Settings → Secrets and variables → Actions** задайте:
+
+- Переменную `TAURI_UPDATER_PUBLIC_KEY` — содержимое файла `afterwork.key.pub`.
+- Секрет `TAURI_SIGNING_PRIVATE_KEY` — содержимое файла `afterwork.key`.
+- Секрет `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — пароль ключа.
+
+Для выпуска укажите одинаковую новую версию в `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` и `src-tauri/tauri.conf.json`. Отправьте тег вида `v0.6.0`. [Workflow выпуска](.github/workflows/release.yml) проверит версии, соберёт подписанный установщик Windows x64 и добавит его, файл `.sig` и `latest.json` в черновик GitHub Release. Проверьте файлы и опубликуйте выпуск как Latest. У уже выпущенной версии 0.5.0 нет обновлятора: первый выпуск с этой функцией нужно установить вручную поверх неё. Установщик использует прежний идентификатор приложения и сохраняет прежний каталог данных.
+
 ## Карта проекта
 
 | Что менять | Где искать |
