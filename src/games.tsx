@@ -8,7 +8,7 @@ type Period = typeof periods[number]['key']
 const dayFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' })
 const timeFormat = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' })
 const dateTime = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })
-const sessionName = (path: string) => path.replace(/^.*[\\/]/, '').replace(/\.exe$/i, '')
+export const sessionName = (path: string) => path.replace(/^.*[\\/]/, '').replace(/\.exe$/i, '')
 const pathLabel = (path: string) => path.startsWith('\\\\?\\') ? path.slice(4) : path
 const emptyHistory: GameSession[] = []
 

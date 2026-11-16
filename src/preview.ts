@@ -2,6 +2,7 @@ import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { dateKey, type Action, type Session, type Snapshot } from './types'
 import type { UpdateStatus } from './desktop'
 import updateFixture from '../fixtures/ipc-update-status.json'
+import { version } from '../package.json'
 
 const gamePath = 'C:/Demo/Game.exe'
 const now = () => Math.floor(Date.now() / 1000)
@@ -13,7 +14,7 @@ export function installPreview() {
   let autostart = false
   const updatePreview = scenario === 'update' || scenario === 'update-offline'
   const updates: UpdateStatus = {
-    ...updateFixture, phase: updatePreview ? 'checking' : 'disabled', version: null, received: 0, total: null,
+    ...updateFixture, currentVersion: version, phase: updatePreview ? 'checking' : 'disabled', version: null, received: 0, total: null,
   }
   function download() {
     if (updates.phase !== 'available') return
@@ -65,6 +66,26 @@ export function installPreview() {
     data.active = { id: 5, activity: 1, started, running: started, spans: [], note: '' }
   }
   if (scenario === 'error') data.failures[gamePath] = 'Файл занят другой программой. Afterwork повторит попытку.'
+  const gameHistory: NonNullable<Snapshot['gameHistory']> = []
+  if (scenario === 'game-stats') {
+    const firstGame = 'C:/Demo/StardewValley.exe'
+    const secondGame = 'C:/Demo/Hades.exe'
+    data.games.push(
+      { path: firstGame, name: 'Stardew Valley', source: 'Steam', catalog_id: '', aliases: [], excluded: false },
+      { path: secondGame, name: 'Hades', source: 'Steam', catalog_id: '', aliases: [], excluded: false },
+    )
+    const time = (day: number, hour: number, minute = 0) => {
+      const date = new Date()
+      date.setDate(date.getDate() + day)
+      date.setHours(hour, minute, 0, 0)
+      return date.getTime() / 1000
+    }
+    gameHistory.push(
+      { id: 1, game: firstGame, start: time(-3, 17, 30), end: time(-3, 20) },
+      { id: 2, game: firstGame, start: time(-2, 23, 30), end: time(-1, 1) },
+      { id: 3, game: secondGame, start: time(-1, 11), end: time(-1, 13) },
+    )
+  }
 
   function pause(session: Session, time: number) {
     if (session.running === null) return
@@ -139,7 +160,7 @@ export function installPreview() {
             activities: Object.fromEntries(Object.entries(summaries).map(([id, item]) => [id, item.seconds])),
           }, history } : null,
           achievementProgress: payload?.achievements ? {} : null,
-          gameHistory: payload?.games ? [] : null,
+          gameHistory: payload?.games || payload?.report ? gameHistory : null,
         } satisfies Snapshot)
       }
       case 'apply': return apply(payload?.action as Action)

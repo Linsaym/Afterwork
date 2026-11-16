@@ -321,7 +321,7 @@ fn make_snapshot(
             })
             .count(),
         running_games: engine.game_tracking.live.keys().cloned().collect(),
-        game_history: games.unwrap_or(false).then(|| engine.game_report()),
+        game_history: (report || games.unwrap_or(false)).then(|| engine.game_report()),
         game_icons: games.unwrap_or(false).then(|| icons.status(&data.games)),
         awards: data.awards.clone(),
         achievement_progress: achievements
@@ -570,6 +570,9 @@ mod tests {
         let expected: Value =
             serde_json::from_str(include_str!("../../fixtures/ipc-snapshot.json")).unwrap();
         assert_eq!(serde_json::to_value(snapshot).unwrap(), expected);
+        let statistics = make_snapshot(&engine, &icons, now, true, Some(false), None);
+        assert!(statistics.game_history.is_some());
+        assert!(statistics.game_icons.is_none());
 
         let expected: Value =
             serde_json::from_str(include_str!("../../fixtures/ipc-actions.json")).unwrap();

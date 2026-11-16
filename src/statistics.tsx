@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Activity, BarChart3, CalendarDays, ChevronLeft, ChevronRight, History } from 'lucide-react'
+import { Activity, BarChart3, CalendarDays, ChevronLeft, ChevronRight, Gamepad2, History } from 'lucide-react'
 import { AchievementPreview } from './achievements'
-import { dateKey, dateOf, duration, type Snapshot } from './types'
+import { sessionName } from './games'
+import { dateKey, dateOf, duration, type Game, type GameSession, type Snapshot } from './types'
 
 const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const monthFormat = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' })
@@ -56,6 +57,7 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
         </section>
         <AchievementPreview awards={data.awards} open={openAchievements} />
       </div>
+      <GameStatistics history={data.gameHistory} games={data.games} />
       <section className="panel list-panel history">
         <div className="card-heading"><span className="card-icon"><History size={19} /></span><div><h2>История сессий</h2><p>Время и результаты завершённых сессий</p></div></div>
         {!history.length ? <p className="empty-inline">Завершённые сессии появятся здесь.</p> : <div className="history-list">{history.slice(0, limit).map(session => {
@@ -66,4 +68,76 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
       </section>
     </>}
   </div>
+}
+
+const gameChartPreference = 'afterwork.hideGameCharts'
+const timeOfDay = ['Ночь · 00:00–06:00', 'Утро · 06:00–12:00', 'День · 12:00–18:00', 'Вечер · 18:00–00:00']
+
+function summarizeGames(history: GameSession[], games: Game[]) {
+  const secondsByTime = timeOfDay.map(() => 0)
+  const gamesByPath = new Map(games.flatMap(game => [game.path, ...game.aliases].map(path => [path, game] as const)))
+  const playCounts = new Map<string, { name: string; count: number; seconds: number }>()
+  for (const { game: path, start, end } of history) {
+    if (!Number.isFinite(new Date(start * 1000).getTime()) || !Number.isFinite(new Date(end * 1000).getTime()) || end <= start) continue
+    const game = gamesByPath.get(path)
+    const key = game?.path ?? path
+    const entry = playCounts.get(key) ?? { name: game?.name ?? sessionName(path), count: 0, seconds: 0 }
+    entry.count += 1
+    entry.seconds += end - start
+    playCounts.set(key, entry)
+
+    // Split a session at local time boundaries, including midnight.
+    for (let cursor = start; cursor < end;) {
+      const local = new Date(cursor * 1000)
+      const bucket = Math.floor(local.getHours() / 6)
+      const boundary = new Date(local.getFullYear(), local.getMonth(), local.getDate(), (bucket + 1) * 6).getTime() / 1000
+      if (!Number.isFinite(boundary) || boundary <= cursor) break
+      const next = Math.min(end, boundary)
+      secondsByTime[bucket] += next - cursor
+      cursor = next
+    }
+  }
+  const topGames = [...playCounts].sort(([, a], [, b]) =>
+    b.count - a.count || b.seconds - a.seconds || a.name.localeCompare(b.name, 'ru'),
+  ).slice(0, 5)
+  return { secondsByTime, topGames }
+}
+
+function GameStatistics({ history, games }: { history: GameSession[] | null; games: Game[] }) {
+  const [hidden, setHidden] = useState(() => localStorage.getItem(gameChartPreference) === 'true')
+  const toggle = () => {
+    localStorage.setItem(gameChartPreference, String(!hidden))
+    setHidden(!hidden)
+  }
+  const summary = !hidden && history ? summarizeGames(history, games) : null
+  const longest = Math.max(1, ...(summary?.secondsByTime ?? []))
+
+  return <section className="panel list-panel history">
+    <div className="card-heading game-statistics-heading">
+      <span className="card-icon"><Gamepad2 size={19} /></span>
+      <div><h2>Игровая статистика</h2><p>За всё время</p></div>
+      <button type="button" className="button secondary" aria-expanded={!hidden} aria-controls="game-statistics-charts" onClick={toggle}>
+        {hidden ? 'Показать диаграммы' : 'Скрыть диаграммы'}
+      </button>
+    </div>
+    <div id="game-statistics-charts" hidden={hidden}>
+      {!summary ? <p className="empty-inline">Загрузка игровой истории…</p> : !summary.topGames.length ? <p className="empty-inline">Диаграммы появятся после первой игровой сессии.</p> :
+        <div className="stats-grid game-statistics-charts">
+          <div>
+            <h3>Игровое время по времени суток</h3>
+            <div className="distribution">{timeOfDay.map((label, index) => <div key={label}>
+              <div><b>{label}</b><span>{duration(summary.secondsByTime[index])}</span></div>
+              <div className="progress-track" aria-hidden="true"><span style={{ width: summary.secondsByTime[index] / longest * 100 + '%' }} /></div>
+            </div>)}</div>
+          </div>
+          <div>
+            <h3>Игры по числу сессий</h3>
+            <div className="distribution">{summary.topGames.map(([key, game]) => <div key={key}>
+              <div><b>{game.name}</b><span>{game.count} · {duration(game.seconds)}</span></div>
+              <div className="progress-track" aria-hidden="true"><span style={{ width: game.count / summary.topGames[0][1].count * 100 + '%' }} /></div>
+            </div>)}</div>
+          </div>
+        </div>}
+    </div>
+  </section>
 }

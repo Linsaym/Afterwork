@@ -146,6 +146,10 @@ main { flex: 1; min-width: 0; overflow: auto; background: radial-gradient(ellips
 .toggle[aria-checked=true] span { transform: translateX(16px); background: #21162f; }
 
 .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.game-statistics-heading { flex-wrap: wrap; }
+.game-statistics-heading button { margin-left: auto; }
+.game-statistics-charts { gap: 24px; margin-top: 20px; }
+.game-statistics-charts h3 { font-size: 14px; margin: 0; }
 .week-chart { display: flex; gap: 10px; margin-top: 21px; height: 166px; }
 .bar-column { flex: 1; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: end; }
 .bar-column small, .calendar small { font-size: 10px; color: var(--muted); }
