@@ -311,6 +311,8 @@ mod tests {
         let source = std::env::var_os("SystemRoot").unwrap();
         let exe = directory.path().join("GameProbe.exe");
         fs::copy(Path::new(&source).join("System32/ping.exe"), &exe).unwrap();
+        // The detector reports canonical paths, including when TEMP is a junction.
+        let exe = fs::canonicalize(exe).unwrap();
         let command = |count: &str| {
             let mut cmd = Command::new(&exe);
             cmd.args(["127.0.0.1", "-n", count])
@@ -336,6 +338,7 @@ mod tests {
         );
         assert_eq!(engine.data.games.len(), 1);
         assert_eq!(engine.locks.len(), 1);
+        assert_eq!(engine.game_tracking.live.len(), 1);
         assert!(running.try_wait().unwrap().is_none());
         assert!(command("1").spawn().is_err());
         engine.observe_games(
@@ -347,6 +350,7 @@ mod tests {
             },
             now + 3,
         );
+        assert_eq!(engine.data.game_sessions.len(), 1);
         assert_eq!(
             engine.data.game_sessions[0].end - engine.data.game_sessions[0].start,
             2

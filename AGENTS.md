@@ -6,7 +6,7 @@
 
 - `npm ci` устанавливает зависимости из lock-файла.
 - `npm run check` собирает фронтенд, проверяет Rust через rustfmt и Clippy, запускает тесты.
-- `npm run dev:preview` открывает браузерное превью на http://localhost:1422. Сценарии описаны в README.
+- `npm run dev:preview` открывает браузерное превью на http://localhost:1422. Сценарии описаны в `DEVELOPMENT.md`.
 - `npm run dev:desktop` запускает Afterwork Dev с отдельным каталогом данных. Используй его для проверки Tauri. Блокировку проверяй тестом на временном `.exe`.
 - `npm run tauri -- build` собирает NSIS-установщик. Запускай для проверки упаковки и релизных изменений.
 
