@@ -3,7 +3,10 @@
   "version": "0.5.0",
   "scripts": {
     "dev": "vite",
+    "dev:preview": "vite --mode preview --port 1422",
+    "dev:desktop": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "build": "tsc --noEmit && vite build",
+    "check": "npm run build && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --locked --manifest-path src-tauri/Cargo.toml",
     "tauri": "tauri"
   },
   "type": "module",

@@ -1,0 +1,13 @@
+[
+  { "type": "start", "activity": 7 },
+  { "type": "pause" },
+  { "type": "resume" },
+  { "type": "finish", "note": "Готово" },
+  { "type": "addActivity", "details": { "name": "Тест", "icon": "target", "color": "green" } },
+  { "type": "editActivity", "id": 7, "details": { "name": "Тест", "icon": "target", "color": "green" } },
+  { "type": "archiveActivity", "id": 7, "archived": true },
+  { "type": "addGame", "path": "C:/Demo/Game.exe" },
+  { "type": "removeGame", "path": "C:/Demo/Game.exe" },
+  { "type": "excludeGame", "path": "C:/Demo/Game.exe", "excluded": true },
+  { "type": "saveSettings", "settings": { "first": 360, "second": 960, "minutes": 45, "notifications": false } }
+]

@@ -1,0 +1,123 @@
+import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
+import { dateKey, type Action, type Session, type Snapshot } from './types'
+
+const gamePath = 'C:/Demo/Game.exe'
+const now = () => Math.floor(Date.now() / 1000)
+
+export function installPreview() {
+  const scenario = new URLSearchParams(location.search).get('scenario') ?? 'demo'
+  const started = now() - 900
+  let nextId = 10
+  let autostart = false
+  const history: Session[] = []
+  const data: Snapshot = {
+    date: dateKey(new Date()), seconds: 0, phase: 1, target: 2700, locked: true,
+    settings: { first: 360, second: 960, minutes: 45, notifications: true },
+    activities: [
+      { id: 1, name: 'Личный проект', icon: 'target', color: 'violet', archived: false },
+      { id: 2, name: 'Чтение', icon: 'book', color: 'green', archived: false },
+    ],
+    activitySummaries: {}, games: [], active: null, elapsed: 0,
+    failures: {}, blockedCount: 0, report: null, runningGames: [], gameHistory: null,
+    gameIcons: null, awards: {}, achievementProgress: null,
+  }
+  if (scenario === 'demo' || scenario === 'archive') {
+    data.activities.push({ id: 3, name: 'Старый проект', icon: 'briefcase', color: 'blue', archived: true })
+    history.push({ id: 4, activity: 3, started: started - 1800, running: null, spans: [[started - 1800, started]], note: 'Пример завершённой сессии' })
+  }
+  if (scenario === 'demo' || scenario === 'locked' || scenario === 'error') {
+    data.games.push({ path: gamePath, name: 'Тестовая игра', source: 'Steam', catalog_id: 'steam:1', aliases: [], excluded: false })
+  }
+  if (scenario === 'demo' || scenario === 'active') {
+    data.active = { id: 5, activity: 1, started, running: started, spans: [], note: '' }
+  }
+  if (scenario === 'error') data.failures[gamePath] = 'Файл занят другой программой. Afterwork повторит попытку.'
+
+  function pause(session: Session, time: number) {
+    if (session.running === null) return
+    session.spans.push([session.running, time])
+    session.running = null
+  }
+
+  function apply(action: Action) {
+    const time = now()
+    const session = data.active
+    switch (action.type) {
+      case 'start':
+        if (session) throw new Error('Завершите текущую сессию.')
+        data.active = { id: nextId++, activity: action.activity, started: time, running: time, spans: [], note: '' }
+        break
+      case 'pause':
+        if (session) pause(session, time)
+        break
+      case 'resume':
+        if (session) session.running ??= time
+        break
+      case 'finish':
+        if (!session) break
+        pause(session, time)
+        history.push({ ...session, note: action.note })
+        data.active = null
+        break
+      case 'addActivity':
+        data.activities.push({ ...action.details, id: nextId++, archived: false })
+        break
+      case 'editActivity':
+      case 'archiveActivity':
+        data.activities = data.activities.map(item => item.id === action.id
+          ? { ...item, ...(action.type === 'editActivity' ? action.details : { archived: action.archived }) }
+          : item)
+        break
+      case 'saveSettings':
+        data.settings = action.settings
+        break
+      case 'excludeGame':
+        data.games = data.games.map(game => game.path === action.path ? { ...game, excluded: action.excluded } : game)
+        break
+      case 'addGame':
+      case 'removeGame':
+        throw new Error('Выбор файлов доступен в Windows-приложении.')
+    }
+  }
+
+  mockWindows('main')
+  mockIPC((command, args) => {
+    const payload = args as Record<string, unknown> | undefined
+    switch (command) {
+      case 'snapshot': {
+        const summaries: Snapshot['activitySummaries'] = {}
+        const time = now()
+        const elapsed = (session: Session) => session.spans.reduce((sum, [start, end]) => sum + end - start, 0)
+          + (session.running === null ? 0 : time - session.running)
+        for (const session of data.active ? [...history, data.active] : history) {
+          const summary = summaries[session.activity] ??= { seconds: 0, lastActive: 0 }
+          summary.seconds += elapsed(session)
+          summary.lastActive = Math.max(summary.lastActive, session.started)
+        }
+        const seconds = Object.values(summaries).reduce((sum, item) => sum + item.seconds, 0)
+        const target = data.settings.minutes * 60
+        const locked = seconds < target
+        return structuredClone({
+          ...data, seconds, target, locked, activitySummaries: summaries,
+          elapsed: data.active ? elapsed(data.active) : 0,
+          blockedCount: locked && scenario !== 'error' ? data.games.filter(game => !game.excluded).length : 0,
+          report: payload?.report ? { totals: {
+            days: seconds ? { [data.date]: seconds } : {},
+            activities: Object.fromEntries(Object.entries(summaries).map(([id, item]) => [id, item.seconds])),
+          }, history } : null,
+          achievementProgress: payload?.achievements ? {} : null,
+          gameHistory: payload?.games ? [] : null,
+        } satisfies Snapshot)
+      }
+      case 'apply': return apply(payload?.action as Action)
+      case 'autostart':
+        if (typeof payload?.enabled === 'boolean') autostart = payload.enabled
+        return autostart
+      case 'plugin:dialog|open': return null
+      case 'plugin:window|minimize':
+      case 'plugin:window|toggle_maximize':
+      case 'plugin:window|close': return undefined
+      default: throw new Error(`Команда не настроена в превью: ${command}`)
+    }
+  })
+}

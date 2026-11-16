@@ -35,12 +35,30 @@ Afterwork ищет иконки в исполняемом файле, ярлык
 
 ## Сборка из исходников
 
-Нужны Node.js, Rust с целью `x86_64-pc-windows-msvc`, Visual Studio Build Tools с C++ и Windows SDK, а также Microsoft Edge WebView2.
+Нужны Node.js из `.node-version`, Rust из `rust-toolchain.toml` с хостом `x86_64-pc-windows-msvc`, Visual Studio Build Tools с C++ и Windows SDK, а также Microsoft Edge WebView2.
 
 ```powershell
 npm ci
+npm run check
+npm run dev:desktop
+```
+
+Afterwork Dev открывает окно Tauri и использует `%APPDATA%\app.afterwork.desktop.dev\afterwork.json`. При первом запуске доступны стандартные занятия и пустая история. Сессии сохраняются между запусками. В этом профиле отключены системные уведомления о фокусе, регистрация автозапуска, поиск игр, автоматическое обновление иконок и блокировка файлов. Чтобы завершить процесс, выберите «Выйти из Afterwork» в трее. Для проверки блокировки используйте тест `enrollment_blocks_new_launches_and_exclusion_keeps_history` с временной копией `ping.exe`.
+
+`npm run dev:preview` запускает интерфейс на http://localhost:1422. Параметр `scenario` принимает значения `empty`, `active`, `archive`, `locked` и `error`. По умолчанию видны активная сессия, архивное занятие и тестовая игра. Изменения хранятся в памяти до перезагрузки страницы. Windows-диалоги и трей проверяются в Afterwork Dev.
+
+Для диагностики распознавания настоящих игр запустите обычный debug-профиль:
+
+```powershell
+$env:AFTERWORK_GAME_DIAGNOSTICS = '1'
 npm run tauri -- dev
-cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+Обычный debug-профиль работает с основным каталогом данных и реальными играми. Завершите установленную копию через трей перед запуском. Диагностика выводит локальные пути, источник распознавания и причины пропуска или неполной блокировки в терминал.
+
+Сборка установщика:
+
+```powershell
 npm run tauri -- build
 ```
 

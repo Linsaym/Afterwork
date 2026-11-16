@@ -1,0 +1,12 @@
+{
+  "productName": "Afterwork Dev",
+  "identifier": "app.afterwork.desktop.dev",
+  "build": {
+    "beforeDevCommand": "npm run dev -- --port 1421",
+    "devUrl": "http://localhost:1421"
+  },
+  "app": {
+    "windows": [{ "label": "main", "title": "Afterwork Dev", "width": 1220, "height": 860, "minWidth": 760, "minHeight": 580, "visible": false, "decorations": false, "backgroundColor": "#0e0f15" }]
+  },
+  "bundle": { "active": false }
+}

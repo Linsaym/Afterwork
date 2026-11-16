@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { desktop } from './desktop'
 import { BarChart3, Check, EyeOff, Gamepad2, History, ImagePlus, Plus, ScanLine, ShieldCheck, Trash2 } from 'lucide-react'
 import { duration, type Game, type GameIconStatus, type GameSession, type Snapshot } from './types'
 
@@ -40,10 +40,10 @@ export function GameIcon({ path, status, large = false }: { path: string; status
   const custom = status?.custom
   const [asset, setAsset] = useState<{ revision: string; url: string }>()
   useEffect(() => {
-    if (!revision) return
+    if (!revision || custom === undefined) return
     let disposed = false
     let url: string | undefined
-    void invoke<ArrayBuffer>('game_icon', { game: path, revision, custom }).then(bytes => {
+    void desktop.gameIcon(path, { revision, custom }).then(bytes => {
       if (disposed || !bytes.byteLength) return
       url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }))
       setAsset({ revision, url })

@@ -1,0 +1,25 @@
+{
+  "date": "2025-01-02",
+  "seconds": 0,
+  "phase": 1,
+  "target": 2700,
+  "locked": true,
+  "settings": { "first": 360, "second": 960, "minutes": 45, "notifications": true },
+  "activities": [
+    { "id": 1, "name": "Работа", "icon": "briefcase", "color": "violet", "archived": false },
+    { "id": 2, "name": "Учёба", "icon": "book", "color": "blue", "archived": false },
+    { "id": 3, "name": "Личный проект", "icon": "target", "color": "green", "archived": false }
+  ],
+  "activitySummaries": {},
+  "games": [],
+  "active": null,
+  "elapsed": 0,
+  "failures": {},
+  "blockedCount": 0,
+  "runningGames": [],
+  "gameHistory": [],
+  "gameIcons": {},
+  "awards": {},
+  "achievementProgress": {},
+  "report": { "totals": { "days": {}, "activities": {} }, "history": [] }
+}

@@ -32,6 +32,7 @@ struct Process {
     created: Timestamp,
     path: PathBuf,
     known: bool,
+    last_rejection: Option<&'static str>,
 }
 
 impl Drop for Process {
@@ -77,6 +78,7 @@ impl Process {
             created: 0,
             path: PathBuf::new(),
             known: false,
+            last_rejection: None,
         };
         if unsafe { WaitForSingleObject(handle, 0) } != WAIT_TIMEOUT {
             return None;
@@ -179,12 +181,24 @@ impl Detector {
             if !process.known && windows.visible.contains(&pid) {
                 if registered.contains(&path_key(&process.path)) {
                     process.known = true;
-                } else if let Some(game) = self
-                    .catalog
-                    .identify(&process.path, pid == windows.foreground)
-                {
-                    process.known = true;
-                    discovered.push(game);
+                } else {
+                    match self
+                        .catalog
+                        .identify(&process.path, pid == windows.foreground)
+                    {
+                        Ok(game) => {
+                            process.known = true;
+                            discovered.push(game);
+                        }
+                        Err(reason)
+                            if crate::game_diagnostics()
+                                && process.last_rejection != Some(reason) =>
+                        {
+                            process.last_rejection = Some(reason);
+                            eprintln!("[Afterwork] {}: {reason}", process.path.display());
+                        }
+                        Err(_) => {}
+                    }
                 }
             }
             if process.known {

@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { invoke } from '@tauri-apps/api/core'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { open } from '@tauri-apps/plugin-dialog'
+import { desktop } from './desktop'
 import {
   Activity as Pulse, ArrowUpRight, BarChart3, Bell, Check, CircleAlert, Clock3,
   Gamepad2, ImagePlus, Layers, LayoutGrid, LockKeyhole, Minus, Pause, Play, Plus, Settings2, ShieldCheck,
@@ -48,7 +46,7 @@ function App() {
   const refresh = useCallback(async () => {
     const request = ++sequence.current
     try {
-      const next = await invoke<Snapshot>('snapshot', { report: page === 'statistics', games: page === 'games', achievements: page === 'achievements' })
+      const next = await desktop.snapshot({ report: page === 'statistics', games: page === 'games', achievements: page === 'achievements' })
       if (request === sequence.current) setData(next)
       return next
     } catch (cause) {
@@ -97,18 +95,15 @@ function App() {
   }
 
   const apply = async (action: Action) => {
-    await invoke('apply', { action })
+    await desktop.apply(action)
     return refresh()
   }
   const showModal = (value: Modal) => { setText(''); setError(''); setModal(value) }
   const closeModal = () => { if (!busy) { setModal(undefined); setError('') } }
   const updateGameIcon = (game: Game, reset = false) => void perform(async () => {
-    const file = reset ? null : await open({
-      title: 'Выберите иконку игры', directory: false, multiple: false,
-      filters: [{ name: 'Изображения', extensions: ['png', 'jpg', 'jpeg', 'ico'] }],
-    })
+    const file = reset ? null : await desktop.chooseIcon()
     if (!reset && typeof file !== 'string') return
-    await invoke('set_game_icon', { game: game.path, file })
+    await desktop.setGameIcon(game.path, file)
     await refresh()
     setModal(undefined)
   })
@@ -130,7 +125,7 @@ function App() {
     })
   }
 
-  const win = getCurrentWindow()
+  const win = desktop.window()
   return <div className="app">
     <header className="titlebar" data-tauri-drag-region>
       <div className="wordmark" data-tauri-drag-region><span className="logo" data-tauri-drag-region><Pulse size={17} /></span>Afterwork<span className="word-dot" /></div>
@@ -162,7 +157,7 @@ function App() {
           {page === 'games' && <Games data={data} busy={busy} editIcon={game => showModal({ type: 'icon', game })} remove={game => showModal({ type: 'remove', game })} exclude={game => void perform(async () => {
             await apply({ type: 'excludeGame', path: game.path, excluded: !game.excluded })
           })} add={() => void perform(async () => {
-            const path = await open({ title: 'Выберите файл игры', directory: false, multiple: false, filters: [{ name: 'Исполняемые файлы', extensions: ['exe'] }] })
+            const path = await desktop.chooseGame()
             if (typeof path === 'string') await apply({ type: 'addGame', path })
           })} />}
           {page === 'settings' && <Preferences initial={data.settings} save={settings => void perform(async () => { await apply({ type: 'saveSettings', settings }) })} busy={busy} reportError={setError} />}
@@ -273,10 +268,10 @@ function Preferences({ initial, save, busy, reportError }: { initial: Settings; 
   const [notifications, setNotifications] = useState(initial.notifications)
   const [autostart, setAutostart] = useState<boolean | null>(null)
   const [changing, setChanging] = useState(false)
-  useEffect(() => { invoke<boolean>('autostart').then(setAutostart).catch(error => reportError(String(error))) }, [reportError])
+  useEffect(() => { desktop.autostart().then(setAutostart).catch(error => reportError(String(error))) }, [reportError])
   const toggle = async () => {
     setChanging(true)
-    try { setAutostart(await invoke<boolean>('autostart', { enabled: !autostart })) }
+    try { setAutostart(await desktop.autostart(!autostart)) }
     catch (error) { reportError(String(error)) }
     finally { setChanging(false) }
   }
@@ -307,4 +302,12 @@ function Toggle({ label, value, change, disabled }: { label: string; value: bool
   return <button type="button" className="toggle" role="switch" aria-label={label} aria-checked={value} disabled={disabled} onClick={change}><span /></button>
 }
 
-createRoot(document.getElementById('root')!).render(<App />)
+const render = () => createRoot(document.getElementById('root')!).render(<App />)
+if (import.meta.env.DEV && import.meta.env.MODE === 'preview') {
+  void import('./preview').then(({ installPreview }) => {
+    installPreview()
+    render()
+  })
+} else {
+  render()
+}

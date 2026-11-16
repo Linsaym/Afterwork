@@ -1,17 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod achievements;
+mod actions;
 mod game_catalog;
 mod game_detector;
 mod game_icons;
 mod game_tracking;
 mod model;
 
-use model::{
-    ActivityDetails, ActivitySummary, Data, Game, GameSession, Session, Settings, Statistics,
-    Timestamp,
-};
-use serde::{Deserialize, Serialize};
+use actions::Action;
+use model::{ActivitySummary, Data, Game, GameSession, Session, Settings, Statistics, Timestamp};
+use serde::Serialize;
 use std::{
     collections::{BTreeMap, HashMap},
     fs::{self, File, OpenOptions},
@@ -30,10 +29,12 @@ use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_notification::NotificationExt;
 
 type CommandResult<T> = Result<T, String>;
+const DEV_IDENTIFIER: &str = "app.afterwork.desktop.dev";
 
 struct Engine {
     data: Data,
     file: PathBuf,
+    isolated: bool,
     locks: HashMap<String, File>,
     failures: HashMap<String, String>,
     retry_at: Timestamp,
@@ -78,6 +79,7 @@ impl Engine {
         let mut engine = Self {
             data,
             file,
+            isolated: false,
             locks: HashMap::new(),
             failures: HashMap::new(),
             retry_at: 0,
@@ -100,11 +102,11 @@ impl Engine {
         let date = achievements::day_of(now);
         if !self.achievements_dirty
             && self.achievement_day == Some(date)
-            && !self
+            && self
                 .data
                 .active
                 .as_ref()
-                .is_some_and(|session| session.running.is_some())
+                .is_none_or(|session| session.running.is_none())
             && self.game_tracking.live.is_empty()
         {
             return;
@@ -157,7 +159,7 @@ impl Engine {
             || !path
                 .extension()
                 .is_some_and(|value| value.eq_ignore_ascii_case("exe"))
-            || lower == PathBuf::from(self.executable.to_string_lossy().to_lowercase())
+            || lower == Path::new(&self.executable.to_string_lossy().to_lowercase())
             || self
                 .protected
                 .iter()
@@ -169,7 +171,7 @@ impl Engine {
     }
 
     fn sync_locks(&mut self, now: Timestamp, force: bool) {
-        if !self.data.status(now).locked() {
+        if self.isolated || !self.data.status(now).locked() {
             self.locks.clear();
             self.failures.clear();
             return;
@@ -186,7 +188,7 @@ impl Engine {
             .flat_map(Game::paths)
             .collect::<std::collections::HashSet<_>>();
         self.locks.retain(|path, _| targets.contains(path.as_str()));
-        self.failures.clear();
+        let previous_failures = std::mem::take(&mut self.failures);
         for path in targets {
             if self.locks.contains_key(path) {
                 continue;
@@ -213,6 +215,9 @@ impl Engine {
                     self.locks.insert(path.to_owned(), file);
                 }
                 Err(error) => {
+                    if game_diagnostics() && previous_failures.get(path) != Some(&error) {
+                        eprintln!("[Afterwork] {path}: {error}");
+                    }
                     self.failures.insert(path.to_owned(), error);
                 }
             }
@@ -222,6 +227,13 @@ impl Engine {
 
 fn storage_error(error: impl std::fmt::Display) -> String {
     format!("Ошибка хранилища Afterwork: {error}")
+}
+
+fn game_diagnostics() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    cfg!(debug_assertions)
+        && *ENABLED
+            .get_or_init(|| std::env::var("AFTERWORK_GAME_DIAGNOSTICS").as_deref() == Ok("1"))
 }
 
 #[derive(Serialize)]
@@ -264,9 +276,27 @@ fn snapshot(
 ) -> CommandResult<Snapshot> {
     let engine = state.lock().map_err(storage_error)?;
     let now = model::now();
+    Ok(make_snapshot(
+        &engine,
+        &icons,
+        now,
+        report,
+        games,
+        achievements,
+    ))
+}
+
+fn make_snapshot(
+    engine: &Engine,
+    icons: &game_icons::IconStore,
+    now: Timestamp,
+    report: bool,
+    games: Option<bool>,
+    achievements: Option<bool>,
+) -> Snapshot {
     let data = &engine.data;
     let status = data.status(now);
-    Ok(Snapshot {
+    Snapshot {
         date: status.day.to_string(),
         seconds: status.seconds,
         phase: status.phase,
@@ -300,24 +330,7 @@ fn snapshot(
             totals: data.statistics(now),
             history: data.history.clone(),
         }),
-    })
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-enum Action {
-    Start { activity: u64 },
-    Pause,
-    Resume,
-    ToggleTimer,
-    Finish { note: String },
-    AddActivity { details: ActivityDetails },
-    EditActivity { id: u64, details: ActivityDetails },
-    ArchiveActivity { id: u64, archived: bool },
-    AddGame { path: String },
-    RemoveGame { path: String },
-    ExcludeGame { path: String, excluded: bool },
-    SaveSettings { settings: Settings },
+    }
 }
 
 #[tauri::command]
@@ -341,105 +354,7 @@ fn apply_action(app: &AppHandle, action: Action) -> CommandResult<()> {
         }
         other => other,
     };
-    engine.update(|data| {
-        match action {
-            Action::Start { activity } => {
-                if data.active.is_some()
-                    || !data
-                        .activities
-                        .iter()
-                        .any(|item| item.id == activity && !item.archived)
-                {
-                    return Err("Выберите занятие и завершите текущую сессию.".into());
-                }
-                data.active = Some(Session {
-                    id: data.id(),
-                    activity,
-                    started: now,
-                    running: Some(now),
-                    spans: Vec::new(),
-                    note: String::new(),
-                    finished: None,
-                });
-            }
-            Action::Pause | Action::Resume | Action::ToggleTimer => {
-                let session = data.active.as_mut().ok_or("Текущая сессия отсутствует.")?;
-                if matches!(action, Action::Pause)
-                    || matches!(action, Action::ToggleTimer) && session.running.is_some()
-                {
-                    session.pause(now);
-                } else {
-                    session.running.get_or_insert(now);
-                }
-            }
-            Action::Finish { note } => {
-                if note.chars().count() > 2000 {
-                    return Err("Заметка слишком длинная.".into());
-                }
-                let mut session = data.active.take().ok_or("Текущая сессия отсутствует.")?;
-                session.pause(now);
-                session.note = note.trim().into();
-                session.finished = Some(now);
-                data.history.push(session);
-            }
-            Action::AddActivity { details } => {
-                let details = data.validate_activity(details, None)?;
-                let id = data.id();
-                data.activities.push(model::Activity {
-                    id,
-                    details,
-                    archived: false,
-                });
-            }
-            Action::EditActivity { id, details } => {
-                let details = data.validate_activity(details, Some(id))?;
-                data.activity_mut(id)?.details = details;
-            }
-            Action::ArchiveActivity { id, archived } => data.activity_mut(id)?.archived = archived,
-            Action::AddGame { path } => {
-                if data
-                    .games
-                    .iter()
-                    .any(|game| game_tracking::contains_path(game, Path::new(&path)))
-                {
-                    return Err("Эта игра уже добавлена.".into());
-                }
-                let name = Path::new(&path)
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                data.games.push(Game {
-                    path,
-                    name,
-                    source: String::new(),
-                    catalog_id: String::new(),
-                    aliases: Vec::new(),
-                    excluded: false,
-                });
-            }
-            Action::RemoveGame { path } => data
-                .games
-                .retain(|game| game.path != path || !game.catalog_id.is_empty()),
-            Action::ExcludeGame { path, excluded } => {
-                let game = data
-                    .games
-                    .iter_mut()
-                    .find(|game| game.path == path)
-                    .ok_or("Игра не найдена.")?;
-                game.excluded = excluded;
-            }
-            Action::SaveSettings { settings } => {
-                settings.validate()?;
-                if data.settings.minutes != settings.minutes {
-                    data.achievement_goals
-                        .insert(achievements::day_of(now), i64::from(settings.minutes) * 120);
-                }
-                data.settings = settings;
-            }
-        }
-        Ok(())
-    })?;
+    engine.update(|data| actions::apply(data, action, now))?;
     engine.close_untracked_games(now);
     engine.sync_locks(now, true);
     engine.refresh_achievements(now);
@@ -464,6 +379,13 @@ fn update_tray_timer(item: &MenuItem<tauri::Wry>, timer: Option<bool>) {
 
 #[tauri::command]
 fn autostart(app: AppHandle, enabled: Option<bool>) -> CommandResult<bool> {
+    if app.config().identifier == DEV_IDENTIFIER {
+        return if enabled == Some(true) {
+            Err("Автозапуск отключён в Afterwork Dev.".into())
+        } else {
+            Ok(false)
+        };
+    }
     let manager = app.autolaunch();
     match enabled {
         Some(true) => manager.enable(),
@@ -495,7 +417,8 @@ fn worker(app: AppHandle) {
                 engine.refresh_achievements(now);
             }
             let slot = engine.data.status(now).reminder_slot(now);
-            engine.data.settings.notifications
+            !engine.isolated
+                && engine.data.settings.notifications
                 && slot.is_some()
                 && slot > engine.data.reminder
                 && engine
@@ -529,8 +452,10 @@ fn main() {
         )
         .setup(|app| {
             let directory = app.path().app_data_dir()?;
+            let isolated = app.config().identifier == DEV_IDENTIFIER;
             app.manage(game_icons::IconStore::new(directory.join("game-icons-v1")));
             let mut engine = Engine::load(directory).map_err(std::io::Error::other)?;
+            engine.isolated = isolated;
             engine.sync_locks(model::now(), true);
             engine.refresh_achievements(model::now());
             let timer_state = engine
@@ -556,12 +481,16 @@ fn main() {
                     "open" => show(app),
                     "timer" => {
                         if let Err(error) = apply_action(app, Action::ToggleTimer) {
-                            let _ = app
-                                .notification()
-                                .builder()
-                                .title("Afterwork")
-                                .body(error)
-                                .show();
+                            if app.config().identifier == DEV_IDENTIFIER {
+                                eprintln!("{error}");
+                            } else {
+                                let _ = app
+                                    .notification()
+                                    .builder()
+                                    .title("Afterwork")
+                                    .body(error)
+                                    .show();
+                            }
                         }
                     }
                     "quit" => {
@@ -587,10 +516,12 @@ fn main() {
                 .build(app)?;
             let handle = app.handle().clone();
             std::thread::spawn(move || worker(handle));
-            let handle = app.handle().clone();
-            std::thread::spawn(move || game_tracking::track(handle));
-            let handle = app.handle().clone();
-            std::thread::spawn(move || game_icons::worker(handle));
+            if !isolated {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || game_tracking::track(handle));
+                let handle = app.handle().clone();
+                std::thread::spawn(move || game_icons::worker(handle));
+            }
             if !std::env::args_os().any(|arg| arg == "--background") {
                 show(app.handle());
             }
@@ -611,4 +542,65 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("Не удалось запустить Afterwork");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+    use serde_json::Value;
+
+    #[test]
+    fn ipc_matches_shared_fixtures() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::load(dir.path().to_owned()).unwrap();
+        let icons = game_icons::IconStore::new(dir.path().join("icons"));
+        let date = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
+        let now = model::boundary(date, 8 * 60);
+        let snapshot = make_snapshot(&engine, &icons, now, true, Some(true), Some(true));
+        let expected: Value =
+            serde_json::from_str(include_str!("../../fixtures/ipc-snapshot.json")).unwrap();
+        assert_eq!(serde_json::to_value(snapshot).unwrap(), expected);
+
+        let expected: Value =
+            serde_json::from_str(include_str!("../../fixtures/ipc-actions.json")).unwrap();
+        let actions: Vec<Action> = serde_json::from_value(expected.clone()).unwrap();
+        assert_eq!(serde_json::to_value(actions).unwrap(), expected);
+    }
+
+    #[test]
+    fn legacy_history_survives_saving_a_session_across_day_start() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("afterwork.json"),
+            include_str!("../../fixtures/legacy-afterwork.json"),
+        )
+        .unwrap();
+        let date = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
+        let rollover = model::boundary(date, 360);
+        let mut engine = Engine::load(dir.path().to_owned()).unwrap();
+        engine
+            .update(|data| actions::apply(data, Action::Start { activity: 7 }, rollover - 60))
+            .unwrap();
+        let mut reopened = Engine::load(dir.path().to_owned()).unwrap();
+        reopened
+            .update(|data| {
+                actions::apply(
+                    data,
+                    Action::Finish {
+                        note: "Новая сессия".into(),
+                    },
+                    rollover + 120,
+                )
+            })
+            .unwrap();
+        let reopened = Engine::load(dir.path().to_owned()).unwrap();
+        assert!(reopened.data.active.is_none());
+        assert_eq!(reopened.data.history[0].note, "Старая заметка");
+        assert_eq!(reopened.data.history[1].note, "Новая сессия");
+        let totals = reopened.data.statistics(rollover + 120);
+        assert_eq!(totals.activities[&7], 260);
+        assert_eq!(totals.days[&date.pred_opt().unwrap()], 60);
+        assert_eq!(totals.days[&date], 120);
+    }
 }

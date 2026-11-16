@@ -473,9 +473,9 @@ impl Catalog {
             .collect()
     }
 
-    pub fn identify(&self, path: &Path, foreground: bool) -> Option<DetectedGame> {
+    pub fn identify(&self, path: &Path, foreground: bool) -> Result<DetectedGame, &'static str> {
         if !gameplay_binary(path) {
-            return None;
+            return Err("файл не подходит под признаки игрового .exe");
         }
         let engine = engine_game(path);
         if let Some(item) = self.installed.iter().find(|item| under(path, &item.root)) {
@@ -484,11 +484,12 @@ impl Catalog {
                 .as_ref()
                 .is_some_and(|relative| path_key(&item.root.join(relative)) == path_key(path));
             if explicit || engine.is_some() || (foreground && item.source != "Riot Games") {
-                return Some(item.game(path.to_owned()));
+                return Ok(item.game(path.to_owned()));
             }
+            return Err("каталог совпал, но запуск игры не подтверждён");
         }
-        let name = engine?;
-        Some(DetectedGame {
+        let name = engine.ok_or("нет совпадения с каталогом или признаками игрового движка")?;
+        Ok(DetectedGame {
             id: format!("local:{}", path_key(path)),
             name,
             source: "Напрямую",
@@ -499,7 +500,8 @@ impl Catalog {
 
 fn under(path: &Path, root: &Path) -> bool {
     let path = PathBuf::from(path_key(path));
-    path.starts_with(path_key(root)) && path != PathBuf::from(path_key(root))
+    let root = path_key(root);
+    path.starts_with(&root) && path != Path::new(&root)
 }
 
 #[cfg(test)]

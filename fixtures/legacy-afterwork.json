@@ -1,0 +1,9 @@
+{
+  "settings": { "first": 360, "second": 960, "minutes": 45, "notifications": false },
+  "activities": [{ "id": 7, "name": "Старое занятие" }],
+  "games": [],
+  "active": null,
+  "history": [{ "id": 8, "activity": 7, "started": 240, "running": null, "spans": [[240, 320]], "note": "Старая заметка" }],
+  "reminder": null,
+  "next_id": 9
+}

@@ -68,11 +68,23 @@ impl Engine {
         let mut games = self.data.games.clone();
         let mut changed = false;
         for entry in sample.discovered {
-            let Ok(path) = self.game_path(&entry.path) else {
-                continue;
+            let path = match self.game_path(&entry.path) {
+                Ok(path) => path,
+                Err(error) => {
+                    if crate::game_diagnostics() {
+                        eprintln!("[Afterwork] {}: {error}", entry.path.display());
+                    }
+                    continue;
+                }
             };
             let Some(path) = path.to_str() else { continue };
-            changed |= enroll(&mut games, entry, path.to_owned());
+            let source = entry.source;
+            if enroll(&mut games, entry, path.to_owned()) {
+                changed = true;
+                if crate::game_diagnostics() {
+                    eprintln!("[Afterwork] {path}: распознано, источник — {source}");
+                }
+            }
         }
         if changed
             && self
