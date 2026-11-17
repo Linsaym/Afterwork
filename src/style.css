@@ -240,3 +240,42 @@ dialog .error { margin-top: 10px; }
 .goal-badge { display: inline-flex; align-items: center; gap: 6px; color: #b77918; background: #edb94218; border: 1px solid #dba53735; border-radius: 20px; padding: 4px 9px; font-size: 12px; }
 .goal-results { margin-top: 12px; overflow-wrap: anywhere; }
 .goal-results ul { padding-left: 20px; font-size: 13px; }
+
+.goal-history-trigger {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin-top: 7px; padding: 4px 8px;
+  border: 1px solid #6b512d; border-radius: 7px; background: #35291e; color: #f0cb88;
+  font-size: 11px; font-weight: 650; transition: background .16s, border-color .16s;
+}
+.goal-history-trigger:hover { background: #483523; border-color: #aa8049; }
+.goal-history-trigger svg:last-child { margin-left: 2px; }
+.goal-history-zero { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; }
+
+.goal-history-dialog {
+  width: min(480px, calc(100vw - 30px)); max-height: min(620px, calc(100dvh - 48px)); padding: 0;
+  border-color: #564234; background: #1c1822; overflow: hidden;
+}
+.goal-history-dialog[open] { display: flex; flex-direction: column; }
+.goal-history-header {
+  display: flex; align-items: center; gap: 11px; padding: 17px 19px 15px;
+  border-bottom: 1px solid #392e36; background: linear-gradient(110deg, #39291f, #241c28 78%);
+}
+.goal-history-emblem { color: #f1c87c; background: #483522; border-color: #745630; }
+.goal-history-header > div { min-width: 0; overflow-wrap: anywhere; }
+.goal-history-header h2 { margin: 0; font-size: 18px; }
+.goal-history-header p { margin-top: 3px; font-size: 12px; }
+.goal-history-header .icon-button { flex: 0 0 35px; align-self: start; margin-left: auto; }
+.goal-history-scroll { min-height: 0; padding: 15px 19px; overflow: auto; overscroll-behavior: contain; }
+.goal-history-scroll:focus-visible { outline-offset: -3px; }
+.goal-history-day + .goal-history-day { margin-top: 16px; }
+.goal-history-day h3 { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; color: #d8c8e2; font-size: 12px; font-weight: 650; }
+.goal-history-day h3 svg { color: #c5a2da; }
+.goal-history-entries, .goal-history-names { margin: 0; padding: 0; list-style: none; }
+.goal-history-entries { border: 1px solid #392f3c; border-radius: 9px; background: #17141d; }
+.goal-history-entry { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: start; gap: 10px; padding: 9px 10px; }
+.goal-history-entry + .goal-history-entry { border-top: 1px solid #392f3c; }
+.goal-history-entry > time { padding-top: 2px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.goal-history-names { display: grid; gap: 8px; }
+.goal-history-names li { display: flex; align-items: start; gap: 7px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.goal-history-check { display: grid; place-items: center; flex: 0 0 18px; height: 18px; border-radius: 50%; color: #f0cb88; background: #3b2e22; }
+.goal-history-footer { padding: 11px 19px; border-top: 1px solid #392e36; color: var(--muted); font-size: 12px; }
+.goal-history-footer strong { color: #f0cb88; font-variant-numeric: tabular-nums; }

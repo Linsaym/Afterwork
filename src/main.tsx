@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { desktop } from './desktop'
+import { Dialog } from './dialog'
 import {
   Activity as Pulse, ArrowUpRight, BarChart3, Bell, Check, CircleAlert, Clock3,
   Flag, Gamepad2, ImagePlus, Layers, LayoutGrid, LockKeyhole, Minus, Pause, Play, Plus, Settings2, ShieldCheck,
@@ -238,16 +239,6 @@ function App() {
       </form>}
     </Dialog>}
   </div>
-}
-
-function Dialog({ children, close, label }: { children: ReactNode; close: () => void; label: string }) {
-  const ref = useRef<HTMLDialogElement>(null)
-  useEffect(() => {
-    const element = ref.current
-    element?.showModal()
-    return () => element?.close()
-  }, [])
-  return <dialog ref={ref} aria-label={label} onCancel={event => { event.preventDefault(); close() }}>{children}</dialog>
 }
 
 export function Heading({ title, subtitle, action }: { title: string; subtitle: string; action?: ReactNode }) {

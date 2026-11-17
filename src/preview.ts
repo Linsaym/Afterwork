@@ -158,7 +158,7 @@ export function installPreview() {
         session.completedGoals = [...(action.completedGoals ?? [])]
         const activity = data.activities.find(a => a.id === session.activity)
         if (activity) activity.goals = activity.goals?.filter(g => !session.completedGoals!.includes(g))
-        history.push({ ...session, note: action.note })
+        history.push({ ...session, finished: time, note: action.note })
         data.active = null
         break
       case 'addActivity':

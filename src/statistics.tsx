@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Trophy, Activity, BarChart3, CalendarDays, ChevronLeft, ChevronRight, Gamepad2, History } from 'lucide-react'
+import { Activity, BarChart3, CalendarDays, Check, ChevronLeft, ChevronRight, Gamepad2, History, Trophy, X } from 'lucide-react'
 import { AchievementPreview } from './achievements'
+import { Dialog } from './dialog'
 import { sessionName } from './games'
 import { dateKey, dateOf, duration, type Game, type GameSession, type Snapshot } from './types'
 
@@ -8,11 +9,50 @@ const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const monthFormat = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' })
 const dayFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' })
 const timeFormat = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' })
+const completionDateFormat = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long' })
+
+type GoalCompletion = { sessionId: number; time: number; names: string[] }
+type GoalHistory = { count: number; completions: GoalCompletion[] }
+
+function CompletedGoals({ activity, history, close }: { activity: string; history: GoalHistory; close: () => void }) {
+  const days = new Map<string, { date: Date; completions: GoalCompletion[] }>()
+  for (const completion of [...history.completions].sort((a, b) => b.time - a.time || b.sessionId - a.sessionId)) {
+    const date = new Date(completion.time * 1000)
+    const key = dateKey(date)
+    const day = days.get(key)
+    if (day) day.completions.push(completion)
+    else days.set(key, { date, completions: [completion] })
+  }
+
+  return <Dialog label={`Выполненные цели — ${activity}`} className="goal-history-dialog" close={close}>
+    <header className="goal-history-header">
+      <span className="card-icon goal-history-emblem"><Trophy size={20} aria-hidden="true" /></span>
+      <div><h2>Выполненные цели</h2><p>{activity}</p></div>
+      <button type="button" className="icon-button" aria-label="Закрыть историю целей" onClick={close}><X size={17} /></button>
+    </header>
+    <div className="goal-history-scroll" tabIndex={0} role="region" aria-label="Выполненные цели по датам">
+      {[...days].map(([key, { date, completions }]) => <section className="goal-history-day" key={key}>
+        <h3><CalendarDays size={14} aria-hidden="true" /><time dateTime={key}>{completionDateFormat.format(date)}</time></h3>
+        <ul className="goal-history-entries">
+          {completions.map(({ sessionId, time, names }) => <li className="goal-history-entry" key={sessionId}>
+            <time dateTime={new Date(time * 1000).toISOString()}>{timeFormat.format(time * 1000)}</time>
+            <ul className="goal-history-names">{names.map((name, index) => <li key={index}>
+              <span className="goal-history-check"><Check size={13} aria-hidden="true" /></span>
+              <span>{name}</span>
+            </li>)}</ul>
+          </li>)}
+        </ul>
+      </section>)}
+    </div>
+    <footer className="goal-history-footer">Выполнено целей: <strong>{history.count}</strong></footer>
+  </Dialog>
+}
 
 export function Statistics({ data, openAchievements }: { data: Snapshot; openAchievements: () => void }) {
   const today = dateOf(data.date)
   const [offset, setOffset] = useState(0)
   const [limit, setLimit] = useState(8)
+  const [goalActivity, setGoalActivity] = useState<number>()
   const report = data.report
   const days = report?.totals.days ?? {}
   const week = Array.from({ length: 7 }, (_, index) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + index - 6, 12))
@@ -21,7 +61,19 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
   const month = new Date(today.getFullYear(), today.getMonth() + offset, 1, 12)
   const empty = (month.getDay() + 6) % 7
   const monthLength = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
-  const activities = data.activities.map(item => ({ ...item, seconds: report?.totals.activities[item.id] ?? 0 })).filter(item => item.seconds > 0 || report?.history.some(s => s.activity === item.id && s.completedGoals?.length)).sort((a, b) => b.seconds - a.seconds)
+  const goalHistory = new Map<number, GoalHistory>()
+  for (const session of report?.history ?? []) {
+    if (!session.completedGoals?.length) continue
+    const entry = goalHistory.get(session.activity) ?? { count: 0, completions: [] }
+    const time = session.finished ?? session.spans.reduce((last, [, end]) => Math.max(last, end), session.started)
+    entry.count += session.completedGoals.length
+    entry.completions.push({ sessionId: session.id, time, names: session.completedGoals })
+    goalHistory.set(session.activity, entry)
+  }
+  const activities = data.activities.map(item => ({
+    ...item, seconds: report?.totals.activities[item.id] ?? 0, goalsDone: goalHistory.get(item.id),
+  })).filter(item => item.seconds > 0 || item.goalsDone).sort((a, b) => b.seconds - a.seconds)
+  const selectedActivity = activities.find(item => item.id === goalActivity)
   const total = activities.reduce((sum, item) => sum + item.seconds, 0)
   const history = report ? [...report.history].reverse() : []
   return <div className="page">
@@ -53,7 +105,15 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
         </section>
         <section className="panel list-panel">
           <div className="card-heading"><span className="card-icon"><Activity size={19} /></span><div><h2>Время по занятиям</h2><p>{duration(total)} за всё время</p></div></div>
-          {activities.length ? <div className="distribution">{activities.map(item => <div key={item.id}><div><b>{item.name}</b><span>{duration(item.seconds)} <small className="goal-badge"><Trophy size={14} />Выполнено целей: {report.history.filter(s => s.activity === item.id).reduce((n, s) => n + (s.completedGoals?.length ?? 0), 0)}</small></span></div><div className="progress-track"><span style={{ width: item.seconds / Math.max(1, total) * 100 + '%' }} /></div></div>)}</div> : <p className="empty-inline">Здесь появится время ваших занятий.</p>}
+          {activities.length ? <div className="distribution">{activities.map(item => <div key={item.id}>
+            <div><b>{item.name}</b><span>{duration(item.seconds)}</span></div>
+            <div className="progress-track"><span style={{ width: item.seconds / Math.max(1, total) * 100 + '%' }} /></div>
+            {item.goalsDone ? <button type="button" className="goal-history-trigger" aria-haspopup="dialog"
+              aria-label={`Выполнено целей: ${item.goalsDone.count}. Занятие «${item.name}»`}
+              onClick={() => setGoalActivity(item.id)}>
+              <Trophy size={14} aria-hidden="true" />Выполнено целей: {item.goalsDone.count}<ChevronRight size={14} aria-hidden="true" />
+            </button> : item.goalsEnabled && <small className="goal-history-zero">Выполнено целей: 0</small>}
+          </div>)}</div> : <p className="empty-inline">Здесь появится время ваших занятий.</p>}
         </section>
         <AchievementPreview awards={data.awards} open={openAchievements} />
       </div>
@@ -67,6 +127,7 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
         {history.length > limit && <button className="button secondary" onClick={() => setLimit(limit + 8)}>Ещё сессии</button>}
       </section>
     </>}
+    {selectedActivity?.goalsDone && <CompletedGoals activity={selectedActivity.name} history={selectedActivity.goalsDone} close={() => setGoalActivity(undefined)} />}
   </div>
 }
 
