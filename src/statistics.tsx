@@ -57,6 +57,7 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
   const days = report?.totals.days ?? {}
   const week = Array.from({ length: 7 }, (_, index) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + index - 6, 12))
   const weekValues = week.map(date => days[dateKey(date)] ?? 0)
+  const weekTotal = weekValues.reduce((sum, value) => sum + value, 0)
   const max = Math.max(data.target * 2, ...weekValues)
   const month = new Date(today.getFullYear(), today.getMonth() + offset, 1, 12)
   const empty = (month.getDay() + 6) % 7
@@ -77,17 +78,18 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
   const total = activities.reduce((sum, item) => sum + item.seconds, 0)
   const history = report ? [...report.history].reverse() : []
   return <div className="page">
-    <div className="heading"><div><h1>Статистика</h1><p>Ваше время, привычки и маленькие победы.</p></div></div>
+    <div className="heading"><div><h1>Статистика</h1><p>Время по занятиям, календарь активности и история сессий.</p></div></div>
     {!report ? <div className="loading">Загрузка статистики…</div> : <>
       <div className="stats-grid">
-        <section className="panel list-panel">
-          <div className="card-heading"><span className="card-icon"><BarChart3 size={19} /></span><div><h2>Последние 7 дней</h2><p>{duration(weekValues.reduce((sum, value) => sum + value, 0))} работы за неделю</p></div></div>
-          <div className="week-chart" aria-label="Время работы по дням">
-            {week.map((date, index) => <div className="bar-column" key={dateKey(date)} title={dayFormat.format(date) + ' · ' + duration(weekValues[index])}>
+        <section className="panel list-panel weekly-panel">
+          <div className="card-heading"><span className="card-icon"><BarChart3 size={19} /></span><div><h2>Последние 7 дней</h2><p>{duration(weekTotal)} работы за неделю</p></div></div>
+          {weekTotal > 0 ? <div className="week-chart" role="list" aria-label="Время работы по дням">
+            {week.map((date, index) => <div className="bar-column" role="listitem" aria-label={dayFormat.format(date) + ' · ' + duration(weekValues[index])} key={dateKey(date)} title={dayFormat.format(date) + ' · ' + duration(weekValues[index])}>
+              <small className="week-value">{weekValues[index] > 0 ? duration(weekValues[index]) : '—'}</small>
               <div className="bar-well"><div className={index === 6 ? 'bar today' : 'bar'} style={{ height: (weekValues[index] ? Math.max(2, weekValues[index] / max * 100) : 0) + '%' }} /></div>
               <small>{weekdays[(date.getDay() + 6) % 7]}</small>
             </div>)}
-          </div>
+          </div> : <p className="chart-empty">За последние 7 дней нет записанного времени.</p>}
         </section>
         <section className="panel list-panel">
           <div className="card-heading"><span className="card-icon"><CalendarDays size={19} /></span><div><h2>Календарь активности</h2><p className="month-label">{monthFormat.format(month)}</p></div><div className="calendar-nav"><button className="icon-button" aria-label="Предыдущий месяц" onClick={() => setOffset(offset - 1)}><ChevronLeft size={17} /></button><button className="icon-button" aria-label="Следующий месяц" disabled={offset === 0} onClick={() => setOffset(offset + 1)}><ChevronRight size={17} /></button></div></div>
@@ -102,18 +104,24 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
               return <div className={'calendar-day ' + level + (key === data.date ? ' is-today' : '')} key={key} title={dayFormat.format(date) + ' · ' + duration(value)}>{date.getDate()}</div>
             })}
           </div>
+          <div className="calendar-legend"><span>Нет времени</span><i /><i className="some" /><i className="half" /><i className="full" /><span>Дневная цель</span></div>
         </section>
         <section className="panel list-panel">
           <div className="card-heading"><span className="card-icon"><Activity size={19} /></span><div><h2>Время по занятиям</h2><p>{duration(total)} за всё время</p></div></div>
-          {activities.length ? <div className="distribution">{activities.map(item => <div key={item.id}>
-            <div><b>{item.name}</b><span>{duration(item.seconds)}</span></div>
+          {activities.length ? <ul className="activity-distribution">{activities.map(item => <li key={item.id}>
+            <div className="activity-distribution-row">
+              <b>{item.name}</b>
+              <span className="activity-distribution-duration">{duration(item.seconds)}</span>
+              {item.goalsDone ? <button type="button" className="goal-history-metric" aria-haspopup="dialog"
+                aria-label={`Выполнено целей: ${item.goalsDone.count}. Занятие «${item.name}»`}
+                title="Посмотреть выполненные цели" onClick={() => setGoalActivity(item.id)}>
+                <Check size={13} aria-hidden="true" /><span>Цели: {item.goalsDone.count}</span>
+              </button> : <span className="goal-history-metric" title="Выполнено целей: 0" aria-label="Выполнено целей: 0">
+                <Check size={13} aria-hidden="true" /><span>Цели: 0</span>
+              </span>}
+            </div>
             <div className="progress-track"><span style={{ width: item.seconds / Math.max(1, total) * 100 + '%' }} /></div>
-            {item.goalsDone ? <button type="button" className="goal-history-trigger" aria-haspopup="dialog"
-              aria-label={`Выполнено целей: ${item.goalsDone.count}. Занятие «${item.name}»`}
-              onClick={() => setGoalActivity(item.id)}>
-              <Trophy size={14} aria-hidden="true" />Выполнено целей: {item.goalsDone.count}<ChevronRight size={14} aria-hidden="true" />
-            </button> : item.goalsEnabled && <small className="goal-history-zero">Выполнено целей: 0</small>}
-          </div>)}</div> : <p className="empty-inline">Здесь появится время ваших занятий.</p>}
+          </li>)}</ul> : <p className="empty-inline">Здесь появится время ваших занятий.</p>}
         </section>
         <AchievementPreview awards={data.awards} open={openAchievements} />
       </div>

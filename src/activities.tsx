@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import {
   Archive, BookOpen, Brain, BriefcaseBusiness, Check, ChevronDown, CodeXml, Dumbbell, Heart,
   Flag, Languages, Layers, Music, Palette, Pencil, Plus, RotateCcw, Search, Sparkles, Target, Trash2, X,
@@ -36,6 +36,8 @@ export function ActivityPicker({ activities, summaries, selected, disabled, choo
   const [highlight, setHighlight] = useState<number>()
   const root = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
+  const popover = useRef<HTMLDivElement>(null)
+  const search = useRef<HTMLInputElement>(null)
   const listId = useId()
   const visible = expanded && !disabled
   const matching = activities.filter(item => !item.archived && matches(item, query))
@@ -45,6 +47,31 @@ export function ActivityPicker({ activities, summaries, selected, disabled, choo
   const options = [...recent, ...others]
   const pointed = options.find(item => item.id === highlight)
   const optionId = (id: number) => listId + '-' + id
+
+  useLayoutEffect(() => {
+    if (!visible) return
+    const button = trigger.current
+    const popup = popover.current
+    const viewport = button?.closest('main')
+    if (!button || !popup || !viewport) return
+    const position = () => {
+      const anchor = button.getBoundingClientRect()
+      const bounds = viewport.getBoundingClientRect()
+      const below = bounds.bottom - anchor.bottom - 16
+      const above = anchor.top - bounds.top - 16
+      const opensUp = below < 304 && above > below
+      popup.dataset.placement = opensUp ? 'above' : 'below'
+      popup.style.maxHeight = Math.max(0, opensUp ? above : below) + 'px'
+    }
+    position()
+    search.current?.focus({ preventScroll: true })
+    viewport.addEventListener('scroll', position)
+    window.addEventListener('resize', position)
+    return () => {
+      viewport.removeEventListener('scroll', position)
+      window.removeEventListener('resize', position)
+    }
+  }, [visible])
 
   useEffect(() => {
     if (!visible) return
@@ -98,10 +125,10 @@ export function ActivityPicker({ activities, summaries, selected, disabled, choo
     <button type="button" ref={trigger} className="picker-trigger" aria-label={selected ? 'Занятие: ' + selected.name : 'Выберите занятие'} aria-expanded={visible} aria-haspopup="listbox" aria-controls={visible ? listId : undefined}
       disabled={disabled} onClick={() => visible ? closePicker() : openPicker()}
       onKeyDown={event => { if (event.key === 'ArrowDown' && !visible) { event.preventDefault(); openPicker() } }}>
-      <ActivityMark activity={selected} /><span>{selected?.name ?? 'Выберите занятие'}</span><ChevronDown size={15} className="picker-chevron" />
+      <ActivityMark activity={selected} /><span title={selected?.name}>{selected?.name ?? 'Выберите занятие'}</span><ChevronDown size={15} className="picker-chevron" />
     </button>
-    {visible && <div className="picker-popover">
-      <label className="activity-search picker-search"><Search size={16} /><input autoFocus role="combobox" aria-label="Поиск занятий" aria-autocomplete="list" aria-expanded="true" aria-controls={listId} aria-activedescendant={pointed ? optionId(pointed.id) : undefined}
+    {visible && <div className="picker-popover" ref={popover}>
+      <label className="activity-search picker-search"><Search size={16} /><input ref={search} role="combobox" aria-label="Поиск занятий" aria-autocomplete="list" aria-expanded="true" aria-controls={listId} aria-activedescendant={pointed ? optionId(pointed.id) : undefined}
         placeholder="Найти занятие…" maxLength={60} value={query} onChange={event => { setQuery(event.target.value); setHighlight(undefined) }} onKeyDown={keySearch} /></label>
       <div className="picker-list" role="listbox" aria-label="Доступные занятия" id={listId}>
         {recent.length > 0 && <div role="group" aria-label="Недавние"><div className="picker-caption" aria-hidden="true">Недавние</div>{recent.map(option)}</div>}
@@ -175,67 +202,60 @@ export function ActivityEditor({ activity, initialName, error, busy, close, save
   </div>
 
   return <form className="activity-editor" onSubmit={submit}>
-    <ActivityMark activity={details} big />
-    <h2>{activity ? 'Редактировать занятие' : 'Новое занятие'}</h2>
-    <label className="field">Название<input autoFocus required maxLength={60} value={details.name} placeholder="Например, английский" onChange={event => setDetails({ ...details, name: event.target.value })} /></label>
-    <fieldset><legend>Иконка</legend><div className="activity-icon-grid">
-      {(Object.keys(icons) as ActivityIcon[]).map(icon => {
-        const [Icon, label] = icons[icon]
-        return <label className="appearance-icon" key={icon} title={label}><input type="radio" name="activity-icon" aria-label={label} checked={details.icon === icon} onChange={() => setDetails({ ...details, icon })} /><span><Icon size={18} /></span></label>
-      })}
-    </div></fieldset>
-    <fieldset><legend>Цвет</legend><div className="activity-color-grid">
-      {(Object.keys(colors) as ActivityColor[]).map(color => <label className="appearance-color" data-color={color} key={color} title={colors[color]}><input type="radio" name="activity-color" aria-label={colors[color]} checked={details.color === color} onChange={() => setDetails({ ...details, color })} /><span><Check size={13} /></span></label>)}
-    </div></fieldset>
-    <div className="goal-management">
-      <div className="goal-management-heading">
-        <Flag size={16} aria-hidden="true" />
-        <strong id="manage-activity-goals">Использовать цели</strong>
-        <button type="button" className="toggle" role="switch" aria-labelledby="manage-activity-goals"
-          aria-checked={!!details.goalsEnabled} disabled={busy || !!draft}
-          onClick={() => setDetails({ ...details, goalsEnabled: !details.goalsEnabled })}><span /></button>
+    <div className="dialog-heading"><ActivityMark activity={details} big /><h2>{activity ? 'Редактировать занятие' : 'Новое занятие'}</h2></div>
+    <div className="dialog-body">
+      <label className="field">Название<input autoFocus required maxLength={60} value={details.name} placeholder="Например, английский" onChange={event => setDetails({ ...details, name: event.target.value })} /></label>
+      <fieldset><legend>Иконка</legend><div className="activity-icon-grid">
+        {(Object.keys(icons) as ActivityIcon[]).map(icon => {
+          const [Icon, label] = icons[icon]
+          return <label className="appearance-icon" key={icon} title={label}><input type="radio" name="activity-icon" aria-label={label} checked={details.icon === icon} onChange={() => setDetails({ ...details, icon })} /><span><Icon size={18} /></span></label>
+        })}
+      </div></fieldset>
+      <fieldset><legend>Цвет</legend><div className="activity-color-grid">
+        {(Object.keys(colors) as ActivityColor[]).map(color => <label className="appearance-color" data-color={color} key={color} title={colors[color]}><input type="radio" name="activity-color" aria-label={colors[color]} checked={details.color === color} onChange={() => setDetails({ ...details, color })} /><span><Check size={13} /></span></label>)}
+      </div></fieldset>
+      <div className="goal-management">
+        <div className="goal-management-heading">
+          <Flag size={16} aria-hidden="true" />
+          <strong id="manage-activity-goals">Использовать цели</strong>
+          <button type="button" className="toggle" role="switch" aria-labelledby="manage-activity-goals"
+            aria-checked={!!details.goalsEnabled} disabled={busy || !!draft}
+            onClick={() => setDetails({ ...details, goalsEnabled: !details.goalsEnabled })}><span /></button>
+        </div>
+        {details.goalsEnabled && <div className="goal-management-body">
+          {goals.length > 0 && <ul className="goal-editor-list" aria-label="Активные цели">
+            {goals.map((goal, index) => <li key={goal} className="goal-editor-row">
+              {draft?.index === index ? nameEditor : <>
+                <button type="button" className="goal-rename" title="Переименовать цель" aria-label={`Переименовать цель «${goal}»`}
+                  ref={element => { if (element) editButtons.current.set(index, element); else editButtons.current.delete(index) }}
+                  disabled={busy || !!draft} onClick={() => setDraft({ index, name: goal })}>
+                  <span>{goal}</span><Pencil size={13} aria-hidden="true" />
+                </button>
+                <button type="button" className="goal-icon goal-remove" title="Удалить цель" aria-label={`Удалить цель «${goal}»`}
+                  disabled={busy || !!draft} onClick={() => {
+                    setDetails({ ...details, goals: goals.filter((_, position) => position !== index) })
+                    requestAnimationFrame(() => (editButtons.current.get(index) ?? addGoal.current)?.focus())
+                  }}><Trash2 size={15} /></button>
+              </>}
+            </li>)}
+          </ul>}
+          {draft?.index === null ? nameEditor : goals.length < maxGoals && <button
+            ref={addGoal} type="button" className="goal-add" disabled={busy || !!draft}
+            onClick={() => setDraft({ index: null, name: '' })}><Plus size={16} />Добавить цель</button>}
+        </div>}
       </div>
-      {details.goalsEnabled && <div className="goal-management-body">
-        {goals.length > 0 && <ul className="goal-editor-list" aria-label="Активные цели">
-          {goals.map((goal, index) => <li key={goal} className="goal-editor-row">
-            {draft?.index === index ? nameEditor : <>
-              <button type="button" className="goal-rename" title="Переименовать цель" aria-label={`Переименовать цель «${goal}»`}
-                ref={element => { if (element) editButtons.current.set(index, element); else editButtons.current.delete(index) }}
-                disabled={busy || !!draft} onClick={() => setDraft({ index, name: goal })}>
-                <span>{goal}</span><Pencil size={13} aria-hidden="true" />
-              </button>
-              <button type="button" className="goal-icon goal-remove" title="Удалить цель" aria-label={`Удалить цель «${goal}»`}
-                disabled={busy || !!draft} onClick={() => {
-                  setDetails({ ...details, goals: goals.filter((_, position) => position !== index) })
-                  requestAnimationFrame(() => (editButtons.current.get(index) ?? addGoal.current)?.focus())
-                }}><Trash2 size={15} /></button>
-            </>}
-          </li>)}
-        </ul>}
-        {draft?.index === null ? nameEditor : goals.length < maxGoals && <button
-          ref={addGoal} type="button" className="goal-add" disabled={busy || !!draft}
-          onClick={() => setDraft({ index: null, name: '' })}><Plus size={16} />Добавить цель</button>}
-      </div>}
+      {error && <p className="error" role="alert">{error}</p>}
     </div>
-    {error && <p className="error" role="alert">{error}</p>}
     <div className="dialog-actions"><button type="button" className="button secondary" disabled={busy} onClick={close}>Отмена</button><button className="button primary" disabled={busy || !details.name.trim() || (!!draft && !validDraft)}>{activity ? 'Сохранить' : 'Создать'}</button></div>
   </form>
 }
 
 function ActivityGoalSummary({ goals }: { goals: string[] }) {
   if (!goals.length) return null
-  const [first, ...rest] = goals
-  return <div className="activity-goal-preview">
-    <div>{first}</div>
-    {rest.length > 0 && <details>
-      <summary title="Показать остальные цели">
-        <span className="goal-preview-more" aria-label={`Остальных целей: ${rest.length}`}>+{rest.length}</span>
-        <span className="goal-preview-less">Свернуть</span>
-        <ChevronDown size={12} aria-hidden="true" />
-      </summary>
-      <ul aria-label="Остальные активные цели">{rest.map(goal => <li key={goal}>{goal}</li>)}</ul>
-    </details>}
-  </div>
+  return <details className="activity-goal-preview">
+    <summary><Flag size={12} />Цели <span>{goals.length}</span><ChevronDown size={12} className="goal-preview-chevron" /></summary>
+    <ul aria-label="Активные цели" tabIndex={0}>{goals.map(goal => <li key={goal}>{goal}</li>)}</ul>
+  </details>
 }
 
 export function Activities({ activities, summaries, busy, create, edit, archive }: {
@@ -244,20 +264,23 @@ export function Activities({ activities, summaries, busy, create, edit, archive 
 }) {
   const [archived, setArchived] = useState(false)
   const [query, setQuery] = useState('')
+  const search = useRef<HTMLInputElement>(null)
   const archiveCount = activities.filter(item => item.archived).length
   const visible = activities.filter(item => item.archived === archived && matches(item, query)).sort((a, b) => byName.compare(a.name, b.name))
   return <div className="page activities-page">
     <div className="heading"><div><h1>Занятия</h1><p>Выберите, чему уделяете время, и настройте список занятий.</p></div><button className="button primary" onClick={create} disabled={busy}><Plus size={17} />Новое занятие</button></div>
     <section className="panel activity-directory" aria-label="Список занятий">
-      <div className="activity-toolbar">
-        <div className="activity-tabs" role="group" aria-label="Состояние занятий">
-          <button type="button" aria-pressed={!archived} onClick={() => setArchived(false)}>Активные <small>{activities.length - archiveCount}</small></button>
-          <button type="button" aria-pressed={archived} onClick={() => setArchived(true)}>Архив <small>{archiveCount}</small></button>
+      <div className="activity-directory-header">
+        <div className="activity-toolbar">
+          <div className="activity-tabs" role="group" aria-label="Состояние занятий">
+            <button type="button" aria-pressed={!archived} onClick={() => setArchived(false)}>Активные <small>{activities.length - archiveCount}</small></button>
+            <button type="button" aria-pressed={archived} onClick={() => setArchived(true)}>Архив <small>{archiveCount}</small></button>
+          </div>
+          <label className="activity-search"><Search size={16} /><input ref={search} aria-label="Поиск по названию" placeholder="Поиск по названию…" value={query} onChange={event => setQuery(event.target.value)} />{query && <button type="button" title="Очистить поиск" aria-label="Очистить поиск" onClick={() => { setQuery(''); search.current?.focus() }}><X size={15} /></button>}</label>
         </div>
-        <label className="activity-search"><Search size={16} /><input aria-label="Поиск по названию" placeholder="Поиск по названию…" value={query} onChange={event => setQuery(event.target.value)} /></label>
+        {visible.length > 0 && <div className="activity-grid activity-columns" aria-hidden="true"><span>ЗАНЯТИЕ</span><span>ВСЁ ВРЕМЯ</span><span>ПОСЛЕДНЯЯ АКТИВНОСТЬ</span><span /></div>}
       </div>
-      {visible.length > 0 ? <>
-        <div className="activity-grid activity-columns" aria-hidden="true"><span>ЗАНЯТИЕ</span><span>ВСЁ ВРЕМЯ</span><span>ПОСЛЕДНЯЯ АКТИВНОСТЬ</span><span /></div>
+      {visible.length > 0 ?
         <ul className="activity-rows">
           {visible.map(item => {
             const summary = summaries[item.id]
@@ -267,7 +290,7 @@ export function Activities({ activities, summaries, busy, create, edit, archive 
             return <li className="activity-grid activity-row" key={item.id}>
               <div className="activity-name" data-color={item.color}>
                 <ActivityMark activity={item} big />
-                <div><strong>{item.name}</strong>{item.goalsEnabled && <ActivityGoalSummary goals={item.goals ?? []} />}</div>
+                <div><strong title={item.name}>{item.name}</strong>{item.goalsEnabled && <ActivityGoalSummary goals={item.goals ?? []} />}</div>
               </div>
               <span className="activity-total" aria-label={'Всего ' + duration(summary?.seconds ?? 0)}>{duration(summary?.seconds ?? 0)}</span>
               <span className="activity-last" aria-label={'Последняя активность: ' + last}>{last}</span>
@@ -276,7 +299,7 @@ export function Activities({ activities, summaries, busy, create, edit, archive 
             </li>
           })}
         </ul>
-      </> : <div className="empty"><Layers size={26} /><h3>{query.trim() ? 'Ничего не найдено' : archived ? 'Архив пуст' : 'Нет активных занятий'}</h3><p>{query.trim() ? 'Попробуйте поискать по другому названию.' : archived ? 'Сюда попадут занятия, которые вы отправите в архив.' : 'Создайте занятие или восстановите его из архива.'}</p></div>}
+      : <div className="empty"><Layers size={26} /><h3>{query.trim() ? 'Ничего не найдено' : archived ? 'Архив пуст' : 'Нет активных занятий'}</h3><p>{query.trim() ? 'Попробуйте поискать по другому названию.' : archived ? 'Сюда попадут занятия, которые вы отправите в архив.' : 'Создайте занятие или восстановите его из архива.'}</p></div>}
       {archived && visible.length > 0 && <div className="activity-archive-note"><Archive size={15} />Время и история архивных занятий остаются в статистике.</div>}
     </section>
   </div>

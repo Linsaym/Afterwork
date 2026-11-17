@@ -175,7 +175,8 @@ export function AchievementUnlock({ ids, close, open }: { ids: string[]; close: 
   if (!item) return null
   return <div className="award-unlock" data-rarity={item.rarity} role="status">
     <Badge item={item} earned />
-    <div><small>{ids.length === 1 ? 'Достижение получено' : 'Новых достижений: ' + ids.length}</small><strong>{item.name}</strong><button onClick={open}>Открыть каталог <ChevronRight size={13} /></button></div>
-    <button className="award-unlock-close" aria-label="Закрыть уведомление" onClick={close}><X size={17} /></button>
+    <div><small>{ids.length === 1 ? 'Достижение получено' : 'Новых достижений: ' + ids.length}</small><strong>{item.name}</strong></div>
+    <button className="button secondary" onClick={open}>Открыть каталог <ChevronRight size={13} /></button>
+    <button className="icon-button award-unlock-close" aria-label="Закрыть уведомление" title="Закрыть уведомление" onClick={close}><X size={17} /></button>
   </div>
 }

@@ -37,7 +37,8 @@ export function installPreview() {
         updates.error = 'Не удалось проверить обновления. Проверьте подключение к интернету и доступность GitHub Releases.'
       } else {
         updates.phase = 'available'
-        updates.version = updateFixture.version
+        const [major, minor, patch] = version.split('.').map(Number)
+        updates.version = `${major}.${minor}.${patch + 1}`
         if (updates.autoUpdate) download()
       }
     }, 1200)

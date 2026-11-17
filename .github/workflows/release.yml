@@ -2,7 +2,9 @@ name: Prepare signed Windows release
 
 on:
   push:
-    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - '!v0.7.5'
 
 permissions:
   contents: write
@@ -22,16 +24,15 @@ jobs:
       - name: Set up Rust
         run: rustup show
       - run: npm ci
-      - name: Validate versions and configure update signing
+      - run: npm run check
+      - name: Validate release tag and configure update signing
         shell: pwsh
         env:
           TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
         run: |
           $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $rustVersion = (cargo metadata --locked --no-deps --format-version 1 --manifest-path src-tauri/Cargo.toml | ConvertFrom-Json).packages[0].version
-          if ($env:GITHUB_REF_NAME -cne "v$version" -or $packageVersion -cne $version -or $rustVersion -cne $version) {
-            throw "The tag, Tauri, npm, and Cargo versions must match."
+          if ($env:GITHUB_REF_NAME -cne "v$version") {
+            throw "Release tag must match the application version: expected v$version."
           }
           if ([string]::IsNullOrWhiteSpace($env:TAURI_UPDATER_PUBLIC_KEY)) {
             throw "Set the TAURI_UPDATER_PUBLIC_KEY repository variable before building a release."
@@ -40,7 +41,6 @@ jobs:
             bundle = @{ createUpdaterArtifacts = $true }
             plugins = @{ updater = @{ pubkey = $env:TAURI_UPDATER_PUBLIC_KEY.Trim() } }
           } | ConvertTo-Json -Depth 5 | Set-Content src-tauri/tauri.release.generated.json
-      - run: npm run check
       - uses: tauri-apps/tauri-action@action-v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -3,3 +3,5 @@ dist/
 target/
 src-tauri/gen/
 *.log
+/.idea/
+/src-tauri/tauri.release.generated.json

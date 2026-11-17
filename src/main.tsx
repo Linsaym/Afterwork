@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { desktop } from './desktop'
 import { Dialog } from './dialog'
 import {
-  Activity as Pulse, ArrowUpRight, BarChart3, Bell, Check, CircleAlert, Clock3,
+  Activity as Pulse, ArrowUpRight, BarChart3, Bell, Check, ChevronDown, CircleAlert, Clock3,
   Flag, Gamepad2, ImagePlus, Layers, LayoutGrid, LockKeyhole, Minus, Pause, Play, Plus, Settings2, ShieldCheck,
   Square, Sun, Sunset, Timer, Trash2, Trophy, X, Zap,
 } from 'lucide-react'
@@ -35,6 +35,8 @@ const todayFormat = new Intl.DateTimeFormat('ru-RU', { weekday: 'long', day: 'nu
 
 function App() {
   const [page, setPage] = useState<Page>('home')
+  const content = useRef<HTMLElement>(null)
+  useLayoutEffect(() => { content.current?.scrollTo(0, 0) }, [page])
   const [data, setData] = useState<Snapshot>()
   const [selection, setSelection] = useState<number>()
   const [busy, setBusy] = useState(false)
@@ -148,13 +150,12 @@ function App() {
     </header>
     <div className="workspace">
       <aside className="sidebar">
-        <div className="nav-label">ПРОСТРАНСТВО</div>
         <nav aria-label="Разделы">
-          {pages.map(({ id, label, icon: Icon }) => <button key={id} className={page === id ? 'nav active' : 'nav'} aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}><Icon size={17} /><span>{label}</span></button>)}
+          {pages.map(({ id, label, icon: Icon }) => <button key={id} className={page === id ? 'nav active' : 'nav'} title={label} aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}><Icon size={18} /><span>{label}</span></button>)}
         </nav>
         <div className="sidebar-bottom"><span className="online" /><span>Работает в фоне</span></div>
       </aside>
-      <main>
+      <main ref={content}>
         {page !== 'settings' && (updateStatus?.phase === 'ready' || updateStatus?.phase === 'installing') && <div className="update-banner" role="status">
           <span>{updateStatus.error ?? (updateStatus.phase === 'ready' ? `Afterwork ${updateStatus.version} готов к установке.` : 'Запускаем установщик Afterwork…')}</span>
           {updateStatus.phase === 'ready' && <button className="button" disabled={busy || !!modal} onClick={confirmUpdate}>Перезапустить и установить</button>}
@@ -184,7 +185,7 @@ function App() {
       </main>
     </div>
     {updateConfirmation && <Dialog label="Установка обновления" close={() => setUpdateConfirmation(undefined)}>
-      <h2>Установить Afterwork {updateConfirmation}?</h2>
+      <div className="dialog-heading"><span className="card-icon"><ArrowUpRight size={19} /></span><h2>Установить Afterwork {updateConfirmation}?</h2></div>
       <p>Afterwork закроется на время установки и откроется снова. Настройки, статистика и текущая сессия сохранятся. Запущенный таймер учтёт время перезапуска.</p>
       <div className="dialog-actions">
         <button autoFocus className="button" onClick={() => setUpdateConfirmation(undefined)}>Позже</button>
@@ -207,35 +208,40 @@ function App() {
           {data?.gameIcons?.[modal.game.path]?.custom && <button className="button secondary" disabled={busy} title="Вернуть автоматическую" aria-label="Вернуть автоматическую" onClick={() => updateGameIcon(modal.game, true)}>Сбросить</button>}
           <button className="button primary" disabled={busy} onClick={() => updateGameIcon(modal.game)}><ImagePlus size={16} />Выбрать файл</button>
         </div>
-      </div> : <form onSubmit={submitModal}>
-        <span className="card-icon">{modal.type === 'finish' ? <Check size={18} /> : <Trash2 size={18} />}</span>
-        <h2>{modal.type === 'finish' ? 'Завершение сессии' : 'Удалить игру?'}</h2>
-        {modal.type === 'finish' && <>
-          {finishGoals.length > 0 && <fieldset className="finish-goals" aria-labelledby="finish-goals-title" aria-describedby="finish-goals-hint">
-            <div className="finish-goals-heading">
-              <span className="finish-goals-icon"><Flag size={16} aria-hidden="true" /></span>
-              <div><strong id="finish-goals-title">Выполненные цели</strong><p id="finish-goals-hint">Отметьте цели, которых достигли за сессию.</p></div>
-              <output aria-label="Выбрано целей" className="finish-goals-count">{completedGoals.length} / {finishGoals.length}</output>
-            </div>
-            <div className="finish-goal-options">
-              {finishGoals.map((goal, index) => <label key={goal} className="finish-goal-option">
-                <input type="checkbox" autoFocus={index === 0} checked={completedGoals.includes(goal)} disabled={busy}
-                  onChange={event => {
-                    const checked = event.target.checked
-                    setCompletedGoals(previous => checked ? [...previous, goal] : previous.filter(item => item !== goal))
-                  }} />
-                <span>{goal}</span><span className="finish-goal-check" aria-hidden="true"><Check size={14} /></span>
-              </label>)}
-            </div>
-          </fieldset>}
-          <label className="field">
-            <span className="finish-note-title">Что удалось сделать? <span className="muted">По желанию</span></span>
-            <textarea autoFocus={!finishGoals.length} rows={3} maxLength={2000} value={text} placeholder="Запишите результат сессии…" onChange={event => setText(event.target.value)} />
-          </label>
-        </>}
-        {modal.type === 'remove' && <p>Игра «{modal.game.name}» будет удалена из списка блокировки.</p>}
-        {error && <p className="error" role="alert">{error}</p>}
-        <div className="dialog-actions"><button className="button secondary" type="button" disabled={busy} onClick={closeModal}>Назад</button><button className={'button ' + (modal.type === 'remove' ? 'danger' : 'primary')} disabled={busy}>{modal.type === 'remove' ? 'Удалить' : 'Сохранить'}</button></div>
+      </div> : <form className="session-dialog" onSubmit={submitModal}>
+        <div className="dialog-heading">
+          <span className="card-icon">{modal.type === 'finish' ? <Check size={18} /> : <Trash2 size={18} />}</span>
+          <div><h2>{modal.type === 'finish' ? 'Завершение сессии' : 'Удалить игру?'}</h2>
+            {modal.type === 'finish' && <p>{activeActivity?.name} · {stopwatch(data?.elapsed ?? 0)}</p>}</div>
+        </div>
+        <div className="dialog-body">
+          {modal.type === 'finish' && <>
+            {finishGoals.length > 0 && <fieldset className="finish-goals" aria-labelledby="finish-goals-title" aria-describedby="finish-goals-hint">
+              <div className="finish-goals-heading">
+                <span className="finish-goals-icon"><Flag size={16} aria-hidden="true" /></span>
+                <div><strong id="finish-goals-title">Выполненные цели</strong><p id="finish-goals-hint">Отметьте цели, которых достигли за сессию.</p></div>
+                <output aria-label="Выбрано целей" className="finish-goals-count">{completedGoals.length} / {finishGoals.length}</output>
+              </div>
+              <div className="finish-goal-options">
+                {finishGoals.map((goal, index) => <label key={goal} className="finish-goal-option">
+                  <input type="checkbox" autoFocus={index === 0} checked={completedGoals.includes(goal)} disabled={busy}
+                    onChange={event => {
+                      const checked = event.target.checked
+                      setCompletedGoals(previous => checked ? [...previous, goal] : previous.filter(item => item !== goal))
+                    }} />
+                  <span>{goal}</span><span className="finish-goal-check" aria-hidden="true"><Check size={14} /></span>
+                </label>)}
+              </div>
+            </fieldset>}
+            <label className="field">
+              <span className="finish-note-title">Что удалось сделать? <span className="muted">По желанию</span></span>
+              <textarea autoFocus={!finishGoals.length} rows={3} maxLength={2000} value={text} placeholder="Запишите результат сессии…" onChange={event => setText(event.target.value)} />
+            </label>
+          </>}
+          {modal.type === 'remove' && <p>Игра «{modal.game.name}» будет удалена из списка блокировки.</p>}
+          {error && <p className="error" role="alert">{error}</p>}
+        </div>
+        <div className="dialog-actions"><button className="button secondary" type="button" disabled={busy} onClick={closeModal}>Отмена</button><button className={'button ' + (modal.type === 'remove' ? 'danger' : 'primary')} disabled={busy}>{modal.type === 'remove' ? 'Удалить' : 'Сохранить сессию'}</button></div>
       </form>}
     </Dialog>}
   </div>
@@ -251,6 +257,7 @@ function Home({ data, busy, selection, select, run, add, finish, games }: {
 }) {
   const running = data.active?.running != null
   const selected = data.activities.find(item => data.active ? item.id === data.active.activity : item.id === selection && !item.archived)
+  const goals = selected?.goalsEnabled ? selected.goals ?? [] : []
   const percent = Math.min(100, Math.floor(data.seconds / (data.target * 2) * 100))
   const unlockedDay = data.seconds >= 2 * data.target
   const left = Math.max(0, data.target * data.phase - data.seconds)
@@ -259,17 +266,17 @@ function Home({ data, busy, selection, select, run, add, finish, games }: {
   const tracked = data.games.some(game => !game.excluded)
   const status = !tracked ? 'Нет игр под контролем' : data.locked ? (hasFailures ? 'Блокировка с ограничениями' : 'Игры заблокированы') : 'Игры разблокированы'
   return <div className="page home">
-    <Heading title="Время для важного" subtitle="Начните с занятия, которому хотите уделить время." action={<span className="date-chip"><Clock3 size={15} /><span>{todayFormat.format(dateOf(data.date))}</span></span>} />
+    <Heading title="Время для важного" subtitle="Запускайте фокус-сессии и следите за дневной целью." action={<span className="date-chip"><Clock3 size={15} /><span>{todayFormat.format(dateOf(data.date))}</span></span>} />
     <div className="hero-grid">
       <section className="panel timer-panel">
-        <div className="card-heading"><span className="card-icon"><Timer size={19} /></span><div><h2>Секундомер</h2><p>Фокус-сессия</p></div></div>
+        <div className="card-heading timer-heading"><span className="card-icon"><Timer size={19} /></span><h2>Фокус-сессия</h2>
+          <div className="timer-state"><span className={running ? 'state-dot running' : 'state-dot'} />{running ? 'Идёт' : data.active ? 'На паузе' : 'Готова к старту'}</div>
+        </div>
         <div className="timer-body">
-          <div className="timer-state"><span className={running ? 'state-dot running' : 'state-dot'} />{running ? 'СЕССИЯ ИДЁТ' : data.active ? 'НА ПАУЗЕ' : 'ГОТОВ К СТАРТУ'}</div>
           <div className="digits" aria-label={'Время: ' + stopwatch(data.elapsed)}>{stopwatch(data.elapsed).split(':').map((value, index) => <span key={index}>{index > 0 && <i>:</i>}{value}</span>)}</div>
-          {selected?.goalsEnabled && <ul className="goal-list">{selected.goals?.map(g => <li key={g}>{g}</li>)}</ul>}
           <div className="activity-line">
             <ActivityPicker activities={data.activities} summaries={data.activitySummaries} selected={selected} disabled={!!data.active || busy} choose={select} create={add} />
-            <button className="icon-button activity-quick-create" title="Новое занятие" aria-label="Новое занятие" disabled={busy} onClick={() => add('')}><Plus size={17} /></button>
+            {!data.active && <button className="icon-button activity-quick-create" title="Новое занятие" aria-label="Новое занятие" disabled={busy} onClick={() => add('')}><Plus size={17} /></button>}
           </div>
           <div className="timer-actions">
             {data.active ? <>
@@ -280,7 +287,7 @@ function Home({ data, busy, selection, select, run, add, finish, games }: {
         </div>
       </section>
       <section className="panel progress-panel">
-        <div className="card-heading"><span className="card-icon"><Zap size={19} /></span><div><h2>Прогресс дня</h2><p>Два этапа до полной свободы</p></div></div>
+        <div className="card-heading"><span className="card-icon"><Zap size={19} /></span><h2>Прогресс дня</h2></div>
         <div className="progress-summary"><div><strong>{Math.floor(data.seconds / 60)}</strong><span> / {settings.minutes * 2} мин</span></div><span className="percentage">{percent}%</span></div>
         <div className="progress-track" role="progressbar" aria-label="Прогресс дня" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: percent + '%' }} /><i /></div>
         <div className="stages">
@@ -296,8 +303,12 @@ function Home({ data, busy, selection, select, run, add, finish, games }: {
         </div>
       </section>
     </div>
+    {goals.length > 0 && <details className="panel session-goals" key={selected?.id}>
+      <summary><Flag size={17} /><strong>Цели занятия</strong><span>{goals.length}</span><ChevronDown size={16} className="session-goals-chevron" /></summary>
+      <ul aria-label="Цели занятия" tabIndex={0}>{goals.map(goal => <li key={goal}>{goal}</li>)}</ul>
+    </details>}
     <section className={'panel unlock ' + (!data.locked && tracked ? 'unlocked' : '')}>
-      <span className="unlock-icon">{data.locked ? <LockKeyhole size={23} /> : <ShieldCheck size={23} />}</span>
+      <span className="unlock-icon">{tracked && data.locked ? <LockKeyhole size={22} /> : tracked ? <ShieldCheck size={22} /> : <Gamepad2 size={22} />}</span>
       <div><h2>{status}</h2><p>{!tracked ? 'Afterwork добавляет распознанные игры в список автоматически.' : hasFailures ? 'Проверьте состояние отдельных файлов в разделе «Игры».' : data.locked ? 'До разблокировки осталось ' + Math.ceil(left / 60) + ' мин работы.' : unlockedDay ? 'Дневная цель выполнена. Игры доступны до ' + clock(settings.first) + '.' : 'Игры доступны до ' + clock(settings.second) + '. Второй этап можно выполнить заранее.'}</p></div>
       <button className="button secondary unlock-button" onClick={games}>Мои игры <ArrowUpRight size={16} /></button>
     </section>
@@ -336,7 +347,7 @@ function Preferences({ initial, save, busy, reportError, updates }: { initial: S
         <div className="setting-row"><div><b>Ежечасное напоминание</b><p>«Пора улучшить жизнь :3» до выполнения второго этапа.</p></div><Toggle label="Ежечасное напоминание" value={notifications} change={() => setNotifications(!notifications)} /></div>
         <div className="setting-row"><div><b>Автозапуск с Windows</b><p>Открывать Afterwork в трее при входе в систему.</p></div><Toggle label="Автозапуск с Windows" value={!!autostart} disabled={changing || autostart === null} change={() => void toggle()} /></div>
       </section>
-      <div className="form-footer"><p>Запущенный секундомер учитывает время сна и перезапуска Windows.</p><button className="button primary" disabled={busy || !dirty}><Check size={17} />Сохранить настройки</button></div>
+      <div className="form-footer"><p role="status">{dirty ? 'Есть несохранённые изменения' : 'Настройки сохранены'}</p><button className={`button ${dirty ? 'primary' : 'secondary'}`} disabled={busy || !dirty}><Check size={17} />Сохранить настройки</button></div>
     </form>
     {updates}
   </div>

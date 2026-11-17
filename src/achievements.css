@@ -3,10 +3,9 @@
 [data-rarity=epic] { --medal: #c8a0ff; --medal-dark: #382450; }
 [data-rarity=legendary] { --medal: #f1c477; --medal-dark: #48321e; }
 
-.awards-page .heading { margin-bottom: 23px; }
 .awards-hero {
   position: relative; isolation: isolate; display: flex; align-items: center; justify-content: space-between;
-  gap: 20px; padding: 21px 24px; border-color: #48335e; overflow: hidden;
+  gap: 20px; padding: 16px 20px; border-color: #48335e; overflow: hidden;
   background: radial-gradient(ellipse at 85% 70%, #322048 0%, transparent 67%), #1a1525;
 }
 .awards-hero::before {
@@ -20,7 +19,7 @@
 .awards-hero-copy strong { color: #eee3ff; }
 .award-ring { display: grid; place-items: center; width: 76px; height: 76px; flex: 0 0 76px; border-radius: 50%; box-shadow: 0 0 25px #9c63e536; }
 .award-ring span { display: grid; place-items: center; width: 66px; height: 66px; border-radius: 50%; background: #21182e; border: 1px solid #594170; font: 800 19px 'Manrope Variable', sans-serif; color: #eadbff; }
-.award-filters { display: grid; gap: 12px; margin-block: 18px 25px; }
+.award-filters { display: grid; gap: 12px; margin-block: 14px 22px; }
 .award-categories { display: flex; flex-wrap: wrap; gap: 6px; }
 .award-categories button {
   display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 9px; color: #b8aec9;
@@ -29,8 +28,8 @@
 }
 .award-categories button:hover { border-color: #5d4681; color: #e8dcfd; }
 .award-categories button[aria-pressed=true] { background: #312340; border-color: #654b88; color: #e5d1ff; }
-.award-filter-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.award-search { margin-left: auto; width: min(238px, 100%); }
+.award-filter-row { display: grid; grid-template-columns: max-content max-content minmax(120px, 1fr); gap: 8px; align-items: center; }
+.award-search { justify-self: end; width: min(270px, 100%); }
 .award-rarity-select { position: relative; min-width: 140px; }
 .award-rarity-select select { appearance: none; width: 100%; min-height: 36px; border: 1px solid #3b314c; border-radius: 8px; background: #181521; color: #d9ccea; font-size: 12px; padding: 6px 26px 6px 9px; }
 .award-rarity-select svg { pointer-events: none; position: absolute; right: 8px; top: 11px; color: #b19dc7; }
@@ -41,11 +40,10 @@
 .award-section-title small { color: #aa9dbb; font-size: 11px; margin-left: 2px; }
 .award-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
 .award-card {
-  display: grid; align-content: start; position: relative; padding: 13px; gap: 8px;
+  display: grid; grid-template-rows: auto 1fr auto auto; position: relative; padding: 15px; gap: 9px;
   min-height: 166px; border-color: #322c40; background: linear-gradient(148deg, #1d1928, #16151f 72%);
   transition: border-color .2s, box-shadow .2s, transform .2s;
 }
-.award-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--medal) 49%, #241b36); }
 .award-card.unlocked {
   border-color: color-mix(in srgb, var(--medal) 37%, #282034);
   background: radial-gradient(ellipse 170px 145px at 8% 0%, color-mix(in srgb, var(--medal-dark) 70%, transparent), transparent), #1c1827;
@@ -54,9 +52,9 @@
 .award-card-top { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .award-card-top > div { min-width: 0; }
 .award-rarity { color: var(--medal); display: block; font-size: 10px; font-weight: 650; margin-bottom: 3px; }
-.award-card h3 { font-weight: 800; font-size: 14px; line-height: 1.23; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.award-card h3 { font-weight: 800; font-size: 15px; line-height: 1.28; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .award-check { color: var(--green); margin-left: auto; align-self: start; flex: 0 0 17px; }
-.award-card p { color: #b9aec7; font-size: 12px; line-height: 1.42; min-height: 34px; }
+.award-card p { color: #b9aec7; font-size: 13px; line-height: 1.45; }
 .award-progress-label { display: flex; align-items: baseline; justify-content: space-between; gap: 3px 7px; flex-wrap: wrap; font-size: 10px; color: #bcafce; font-variant-numeric: tabular-nums; }
 .award-progress-label span:last-child { color: var(--medal); }
 .award-progress { background: #332a43; height: 5px; border-radius: 12px; overflow: hidden; }
@@ -76,22 +74,32 @@
 .preview-earned { margin-left: auto; color: var(--green); flex-shrink: 0; }
 
 .award-unlock {
-  position: fixed; right: 20px; bottom: 20px; z-index: 4; display: flex; align-items: center; gap: 11px;
-  width: min(350px, calc(100vw - 32px)); padding: 13px; border: 1px solid color-mix(in srgb, var(--medal) 60%, #352048);
-  border-radius: 12px; background: radial-gradient(ellipse at 20% 0%, var(--medal-dark), #21192d 74%);
-  box-shadow: 0 8px 35px #050209b7, 0 0 27px color-mix(in srgb, var(--medal) 22%, transparent);
+  flex-shrink: 0; display: flex; align-items: center; gap: 11px; min-height: 58px;
+  padding: 7px clamp(12px, 3vw, 32px); border-top: 1px solid color-mix(in srgb, var(--medal) 45%, #352048);
+  background: linear-gradient(100deg, var(--medal-dark), #1b1726 66%);
   animation: new-award .42s cubic-bezier(.19, .89, .29, 1.17) both;
 }
 .award-unlock .medal-badge { animation: medal-reveal .58s .05s ease-out both; }
 .award-unlock > div { flex: 1; min-width: 0; }
 .award-unlock small, .award-unlock strong { display: block; }
 .award-unlock small { color: var(--medal); font-size: 11px; font-weight: 650; }
-.award-unlock strong { margin: 3px 0 4px; font: 800 17px 'Manrope Variable', sans-serif; }
-.award-unlock button { background: transparent; border: 0; padding: 2px; color: #dfd1f1; display: inline-flex; align-items: center; gap: 2px; font-size: 11px; }
-.award-unlock button:hover { color: white; }
-.award-unlock-close { align-self: start; }
+.award-unlock strong { margin-top: 2px; font: 800 15px 'Manrope Variable', sans-serif; }
+.award-unlock .button { min-height: 36px; }
+.award-unlock .medal-badge { flex: 0 0 38px; width: 38px; height: 38px; }
 @keyframes new-award { from { transform: translateY(14px) scale(.95); opacity: 0; } }
 @keyframes medal-reveal { 0% { transform: scale(.70) rotate(-15deg); opacity: .2; } 55% { transform: scale(1.11) rotate(5deg); } 100% { transform: scale(1) rotate(0); opacity: 1; } }
 
 @media (max-width: 1020px) { .award-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 650px) { .award-grid { grid-template-columns: minmax(0, 1fr); } .award-search { margin-left: 0; } }
+@media (max-width: 650px) { .award-grid { grid-template-columns: minmax(0, 1fr); } }
+
+@media (max-width: 800px) {
+  .award-filter-row { grid-template-columns: max-content minmax(0, 1fr); }
+  .award-rarity-select { justify-self: start; }
+  .award-search { grid-column: 1 / -1; justify-self: stretch; width: 100%; }
+}
+@media (max-width: 560px) {
+  .award-filter-row { display: flex; flex-wrap: wrap; }
+  .award-search { width: 100%; }
+  .awards-hero { gap: 10px; padding: 14px; }
+  .awards-hero-copy { gap: 9px; }
+}
