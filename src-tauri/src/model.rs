@@ -78,6 +78,10 @@ pub struct Activity {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ActivityDetails {
+    #[serde(default, rename = "goalsEnabled")]
+    pub goals_enabled: bool,
+    #[serde(default)]
+    pub goals: Vec<String>,
     pub name: String,
     #[serde(default)]
     pub icon: ActivityIcon,
@@ -156,6 +160,8 @@ pub struct GameSession {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Session {
+    #[serde(default, rename = "completedGoals")]
+    pub completed_goals: Vec<String>,
     pub id: u64,
     pub activity: u64,
     pub started: Timestamp,
@@ -227,6 +233,8 @@ impl Default for Data {
             .map(|(i, (name, icon, color))| Activity {
                 id: i as u64 + 1,
                 details: ActivityDetails {
+                    goals_enabled: false,
+                    goals: Vec::new(),
                     name: name.into(),
                     icon,
                     color,
@@ -273,6 +281,21 @@ impl Data {
         details.name = details.name.trim().to_owned();
         if details.name.is_empty() || details.name.chars().count() > 60 {
             return Err("Введите название длиной от 1 до 60 символов.".into());
+        }
+        for goal in &mut details.goals {
+            *goal = goal.trim().to_owned();
+        }
+        if details.goals.len() > 100
+            || details
+                .goals
+                .iter()
+                .any(|g| g.is_empty() || g.chars().count() > 120)
+        {
+            return Err("Введите до 100 целей длиной от 1 до 120 символов.".into());
+        }
+        let unique: std::collections::BTreeSet<_> = details.goals.iter().collect();
+        if unique.len() != details.goals.len() {
+            return Err("Названия целей должны различаться.".into());
         }
         let lower = details.name.to_lowercase();
         if self
@@ -386,6 +409,7 @@ mod tests {
         let mut data = Data {
             activities: vec![activity],
             history: vec![Session {
+                completed_goals: Vec::new(),
                 id: 8,
                 activity: 7,
                 started: 100,
@@ -415,6 +439,7 @@ mod tests {
         let morning = boundary(date, 360);
         let evening = boundary(date, 960);
         data.active = Some(Session {
+            completed_goals: Vec::new(),
             id: 4,
             activity: 1,
             started: morning,
@@ -441,6 +466,7 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
         let start = boundary(date, 360);
         data.active = Some(Session {
+            completed_goals: Vec::new(),
             id: 4,
             activity: 1,
             started: start - 1800,

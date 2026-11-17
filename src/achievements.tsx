@@ -15,13 +15,14 @@ const groups = [
   { id: 'time', label: 'Время — золото', icon: Hourglass },
   { id: 'marathon', label: 'Марафонец', icon: Mountain },
   { id: 'projects', label: 'Проекты и развитие', icon: Layers3 },
+  { id: 'activity-goals', label: 'Цели занятий', icon: Flag },
   { id: 'balance', label: 'Баланс и игры', icon: Gamepad2 },
   { id: 'secret', label: 'Секретные', icon: Sparkles },
 ] as const
 const rarityLabels = { common: 'Обычное', rare: 'Редкое', epic: 'Эпическое', legendary: 'Легендарное' } as const
 type Rarity = keyof typeof rarityLabels
 type Group = typeof groups[number]['id']
-type Unit = 'event' | 'goal' | 'day' | 'time' | 'elapsedDays' | 'activity'
+type Unit = 'event' | 'goal' | 'day' | 'time' | 'elapsedDays' | 'activity' | 'game'
 
 type MedalDefinition = {
   id: string
@@ -62,6 +63,13 @@ const catalog: MedalDefinition[] = [
   { id: 'back-to-work', name: 'Вернулся к делу', description: 'Вернитесь к занятию после 7 дней перерыва.', group: 'projects', rarity: 'rare', icon: RotateCcw, unit: 'elapsedDays' },
   { id: 'craft-master', name: 'Мастер своего дела', description: 'Накопите 100 часов в одном занятии.', group: 'projects', rarity: 'epic', icon: Award, unit: 'time' },
   { id: 'result', name: 'Есть результат!', description: 'Впервые сохраните заметку о результате сессии.', group: 'projects', rarity: 'common', icon: NotebookPen, unit: 'event' },
+  { id: 'activity-goal-first', name: 'Первая отметка', description: 'Отметьте первую выполненную цель при завершении сессии.', group: 'activity-goals', rarity: 'common', icon: Flag, unit: 'event' },
+  { id: 'activity-goal-ten', name: 'Десять финишей', description: 'Выполните 10 целей занятий.', group: 'activity-goals', rarity: 'rare', icon: Medal, unit: 'goal' },
+  { id: 'activity-goal-triple', name: 'Три за один подход', description: 'Выполните 3 цели за одну сессию.', group: 'activity-goals', rarity: 'rare', icon: Rocket, unit: 'goal' },
+  { id: 'activity-goal-variety', name: 'Прогресс по всем фронтам', description: 'Выполните хотя бы по одной цели в 3 разных занятиях.', group: 'activity-goals', rarity: 'epic', icon: Layers3, unit: 'activity' },
+  { id: 'game-first-minute', name: 'В игре', description: 'Проведите хотя бы минуту в одной отслеживаемой игровой сессии.', group: 'balance', rarity: 'common', icon: Gamepad2, unit: 'time' },
+  { id: 'game-variety', name: 'За новыми мирами', description: 'Поиграйте в 3 разные игры хотя бы по 10 минут за одну сессию в каждой.', group: 'balance', rarity: 'rare', icon: Compass, unit: 'game' },
+  { id: 'game-days', name: 'Перерыв на игру', description: 'Поиграйте хотя бы по 10 минут в 3 разных дня.', group: 'balance', rarity: 'common', icon: CalendarDays, unit: 'day' },
   { id: 'work-first', name: 'Сначала дело', description: 'Завершите первый этап до первого запуска игры за день.', group: 'balance', rarity: 'rare', icon: ShieldCheck, unit: 'event' },
   { id: 'early-freedom', name: 'Ранняя свобода', description: 'Накопите 90 минут работы до 16:00.', group: 'balance', rarity: 'rare', icon: AlarmClock, unit: 'time' },
   { id: 'perfect-balance', name: 'Идеальный баланс', description: 'За завершившийся день поработайте дольше, чем играли.', group: 'balance', rarity: 'rare', icon: Scale, unit: 'event' },
@@ -87,6 +95,7 @@ function Badge({ item, earned, small = false }: { item: MedalDefinition; earned:
 function progressText(unit: Unit, current: number, target: number) {
   if (unit === 'time') return duration(current) + ' / ' + duration(target)
   if (unit === 'elapsedDays') return Math.floor(current / 86400) + ' / ' + Math.floor(target / 86400) + ' дн.'
+  if (unit === 'game') return current + ' / ' + target + ' игр'
   return current + ' / ' + target + (unit === 'goal' ? ' целей' : unit === 'day' ? ' дн.' : unit === 'activity' ? ' занятий' : '')
 }
 

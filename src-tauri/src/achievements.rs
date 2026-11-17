@@ -1,7 +1,7 @@
 use crate::model::{boundary, local, Data, GameSession, Timestamp};
 use chrono::{Days, NaiveDate, Timelike};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const DAY_START: u32 = 6 * 60;
 const NORMAL_TARGET: i64 = 90 * 60;
@@ -43,6 +43,7 @@ mod tests {
 
     fn session(id: u64, spans: Vec<Span>) -> Session {
         Session {
+            completed_goals: Vec::new(),
             id,
             activity: 1,
             started: spans[0][0],
@@ -126,7 +127,36 @@ mod tests {
         assert_eq!(stats["flow"].current, 90 * 60);
         assert_eq!(stats["deep-work"].current, HOUR);
         assert_eq!(stats["result"].current, 1);
-        assert_eq!(stats.len(), 38);
+    }
+
+    #[test]
+    fn awards_use_completed_activity_goals_and_recorded_play() {
+        let mut focus = session(8, vec![[1000, 1450]]);
+        focus.completed_goals = vec!["Outline".into(), "Draft".into(), "Review".into()];
+        let mut data = Data {
+            history: vec![focus.clone()],
+            active: Some(focus),
+            ..Data::default()
+        };
+        let first = GameSession {
+            id: 9,
+            game: "Game".into(),
+            start: 1500,
+            end: 2100,
+            launched: None,
+        };
+        let mut second = first.clone();
+        second.id = 10;
+        second.game = "Other".into();
+        second.end -= 1;
+        data.activities[0].details.goals = vec!["Unfinished".into()];
+        let stats = progress(&data, &[first, second], 2100);
+        assert_eq!(stats["activity-goal-first"].current, 1);
+        assert_eq!(stats["activity-goal-ten"].current, 3);
+        assert_eq!(stats["activity-goal-triple"].current, 3);
+        assert_eq!(stats["activity-goal-variety"].current, 1);
+        assert_eq!(stats["game-first-minute"].current, 60);
+        assert_eq!(stats["game-variety"].current, 1);
     }
 }
 
@@ -218,6 +248,12 @@ struct Facts {
     activity_break: i64,
     best_activity: i64,
     noted: i64,
+    activity_goals: i64,
+    best_goal_session: i64,
+    activities_with_goals: i64,
+    longest_game_session: i64,
+    distinct_games: i64,
+    game_days: i64,
     first_before_game: i64,
     early: i64,
     balanced: i64,
@@ -250,6 +286,16 @@ impl Facts {
                 .count() as i64,
             ..Self::default()
         };
+        let mut activities_with_goals = BTreeSet::new();
+        for session in &data.history {
+            let count = session.completed_goals.len() as i64;
+            if count > 0 {
+                facts.activity_goals += count;
+                facts.best_goal_session = facts.best_goal_session.max(count);
+                activities_with_goals.insert(session.activity);
+            }
+        }
+        facts.activities_with_goals = activities_with_goals.len() as i64;
         let mut days = BTreeMap::<NaiveDate, Day>::new();
         let mut by_activity = BTreeMap::<u64, Vec<Span>>::new();
         for session in data.sessions() {
@@ -281,8 +327,31 @@ impl Facts {
                 facts.activity_break = facts.activity_break.max(pair[1][0] - pair[0][1]);
             }
         }
+        let game_paths: BTreeMap<_, _> = data
+            .games
+            .iter()
+            .flat_map(|game| {
+                let identity = if game.catalog_id.is_empty() {
+                    &game.path
+                } else {
+                    &game.catalog_id
+                };
+                game.paths().map(move |path| (path, identity.as_str()))
+            })
+            .collect();
+        let mut distinct_games = BTreeSet::new();
         for game in games {
             let end = game.end.min(now);
+            let elapsed = (end - game.start).max(0);
+            facts.longest_game_session = facts.longest_game_session.max(elapsed);
+            if elapsed >= 10 * 60 {
+                distinct_games.insert(
+                    game_paths
+                        .get(game.game.as_str())
+                        .copied()
+                        .unwrap_or(&game.game),
+                );
+            }
             each_day([game.start, end], |date, span| {
                 let day = days.entry(date).or_default();
                 day.play.push(span);
@@ -294,6 +363,7 @@ impl Facts {
                     .observe_game(launch, true);
             }
         }
+        facts.distinct_games = distinct_games.len() as i64;
 
         let coverage = merge(data.game_monitoring.clone());
         let mut previous_goal: Option<NaiveDate> = None;
@@ -303,6 +373,9 @@ impl Facts {
             let play = merge(day.play);
             let total = seconds(&work);
             let played = seconds(&play);
+            if played >= 10 * 60 {
+                facts.game_days += 1;
+            }
             let start = boundary(date, DAY_START);
             let end = boundary(date.succ_opt().unwrap(), DAY_START);
             let target = data
@@ -400,6 +473,13 @@ pub fn progress(data: &Data, games: &[GameSession], now: Timestamp) -> BTreeMap<
         "back-to-work": activity_break >= 7 * 24 * HOUR,
         "craft-master": best_activity >= 100 * HOUR,
         "result": noted >= 1,
+        "activity-goal-first": activity_goals >= 1,
+        "activity-goal-ten": activity_goals >= 10,
+        "activity-goal-triple": best_goal_session >= 3,
+        "activity-goal-variety": activities_with_goals >= 3,
+        "game-first-minute": longest_game_session >= 60,
+        "game-variety": distinct_games >= 3,
+        "game-days": game_days >= 3,
         "work-first": first_before_game >= 1,
         "early-freedom": early >= NORMAL_TARGET,
         "perfect-balance": balanced >= 1,

@@ -4,11 +4,40 @@
   "phase": 1,
   "target": 2700,
   "locked": true,
-  "settings": { "first": 360, "second": 960, "minutes": 45, "notifications": true },
+  "settings": {
+    "first": 360,
+    "second": 960,
+    "minutes": 45,
+    "notifications": true
+  },
   "activities": [
-    { "id": 1, "name": "Работа", "icon": "briefcase", "color": "violet", "archived": false },
-    { "id": 2, "name": "Учёба", "icon": "book", "color": "blue", "archived": false },
-    { "id": 3, "name": "Личный проект", "icon": "target", "color": "green", "archived": false }
+    {
+      "id": 1,
+      "name": "Работа",
+      "icon": "briefcase",
+      "color": "violet",
+      "archived": false,
+      "goalsEnabled": false,
+      "goals": []
+    },
+    {
+      "id": 2,
+      "name": "Учёба",
+      "icon": "book",
+      "color": "blue",
+      "archived": false,
+      "goalsEnabled": false,
+      "goals": []
+    },
+    {
+      "id": 3,
+      "name": "Личный проект",
+      "icon": "target",
+      "color": "green",
+      "archived": false,
+      "goalsEnabled": false,
+      "goals": []
+    }
   ],
   "activitySummaries": {},
   "games": [],
@@ -21,5 +50,11 @@
   "gameIcons": {},
   "awards": {},
   "achievementProgress": {},
-  "report": { "totals": { "days": {}, "activities": {} }, "history": [] }
+  "report": {
+    "totals": {
+      "days": {},
+      "activities": {}
+    },
+    "history": []
+  }
 }

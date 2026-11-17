@@ -87,6 +87,51 @@ export function installPreview() {
     )
   }
 
+  function newAchievementProgress(time: number) {
+    const completed = history.filter(session => session.completedGoals?.length)
+    const counts = completed.map(session => session.completedGoals?.length ?? 0)
+    const total = counts.reduce((sum, count) => sum + count, 0)
+    const distinct = new Set(completed.map(session => session.activity)).size
+    const games = new Set<string>()
+    const days = new Map<string, [number, number][]>()
+    let longest = 0
+    for (const session of gameHistory) {
+      const end = Math.min(session.end, time)
+      longest = Math.max(longest, end - session.start)
+      if (end - session.start >= 600) games.add(session.game)
+      for (let from = session.start; from < end;) {
+        const day = new Date(from * 1000)
+        if (day.getHours() < 6) day.setDate(day.getDate() - 1)
+        const key = dateKey(day)
+        const next = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1, 6).getTime() / 1000
+        const to = Math.min(next, end)
+        const spans = days.get(key) ?? []
+        spans.push([from, to])
+        days.set(key, spans)
+        from = to
+      }
+    }
+    const playedDays = [...days.values()].filter(spans => {
+      let elapsed = 0
+      let previousEnd = -Infinity
+      for (const [start, end] of spans.sort(([a], [b]) => a - b)) {
+        elapsed += Math.max(0, end - Math.max(start, previousEnd))
+        previousEnd = Math.max(previousEnd, end)
+      }
+      return elapsed >= 600
+    }).length
+    const progress = (current: number, target: number) => ({ current: Math.min(current, target), target })
+    return {
+      'activity-goal-first': progress(total, 1),
+      'activity-goal-ten': progress(total, 10),
+      'activity-goal-triple': progress(counts.reduce((max, count) => Math.max(max, count), 0), 3),
+      'activity-goal-variety': progress(distinct, 3),
+      'game-first-minute': progress(longest, 60),
+      'game-variety': progress(games.size, 3),
+      'game-days': progress(playedDays, 3),
+    }
+  }
+
   function pause(session: Session, time: number) {
     if (session.running === null) return
     session.spans.push([session.running, time])
@@ -110,6 +155,9 @@ export function installPreview() {
       case 'finish':
         if (!session) break
         pause(session, time)
+        session.completedGoals = [...(action.completedGoals ?? [])]
+        const activity = data.activities.find(a => a.id === session.activity)
+        if (activity) activity.goals = activity.goals?.filter(g => !session.completedGoals!.includes(g))
         history.push({ ...session, note: action.note })
         data.active = null
         break
@@ -141,6 +189,10 @@ export function installPreview() {
       case 'snapshot': {
         const summaries: Snapshot['activitySummaries'] = {}
         const time = now()
+        const achievementProgress = newAchievementProgress(time)
+        for (const [id, { current, target }] of Object.entries(achievementProgress)) {
+          if (current >= target) data.awards[id] ??= time
+        }
         const elapsed = (session: Session) => session.spans.reduce((sum, [start, end]) => sum + end - start, 0)
           + (session.running === null ? 0 : time - session.running)
         for (const session of data.active ? [...history, data.active] : history) {
@@ -159,7 +211,7 @@ export function installPreview() {
             days: seconds ? { [data.date]: seconds } : {},
             activities: Object.fromEntries(Object.entries(summaries).map(([id, item]) => [id, item.seconds])),
           }, history } : null,
-          achievementProgress: payload?.achievements ? {} : null,
+          achievementProgress: payload?.achievements ? achievementProgress : null,
           gameHistory: payload?.games || payload?.report ? gameHistory : null,
         } satisfies Snapshot)
       }

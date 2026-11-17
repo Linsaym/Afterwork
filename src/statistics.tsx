@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Activity, BarChart3, CalendarDays, ChevronLeft, ChevronRight, Gamepad2, History } from 'lucide-react'
+import { Trophy, Activity, BarChart3, CalendarDays, ChevronLeft, ChevronRight, Gamepad2, History } from 'lucide-react'
 import { AchievementPreview } from './achievements'
 import { sessionName } from './games'
 import { dateKey, dateOf, duration, type Game, type GameSession, type Snapshot } from './types'
@@ -21,7 +21,7 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
   const month = new Date(today.getFullYear(), today.getMonth() + offset, 1, 12)
   const empty = (month.getDay() + 6) % 7
   const monthLength = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
-  const activities = data.activities.map(item => ({ ...item, seconds: report?.totals.activities[item.id] ?? 0 })).filter(item => item.seconds > 0).sort((a, b) => b.seconds - a.seconds)
+  const activities = data.activities.map(item => ({ ...item, seconds: report?.totals.activities[item.id] ?? 0 })).filter(item => item.seconds > 0 || report?.history.some(s => s.activity === item.id && s.completedGoals?.length)).sort((a, b) => b.seconds - a.seconds)
   const total = activities.reduce((sum, item) => sum + item.seconds, 0)
   const history = report ? [...report.history].reverse() : []
   return <div className="page">
@@ -53,7 +53,7 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
         </section>
         <section className="panel list-panel">
           <div className="card-heading"><span className="card-icon"><Activity size={19} /></span><div><h2>Время по занятиям</h2><p>{duration(total)} за всё время</p></div></div>
-          {activities.length ? <div className="distribution">{activities.map(item => <div key={item.id}><div><b>{item.name}</b><span>{duration(item.seconds)}</span></div><div className="progress-track"><span style={{ width: item.seconds / total * 100 + '%' }} /></div></div>)}</div> : <p className="empty-inline">Здесь появится время ваших занятий.</p>}
+          {activities.length ? <div className="distribution">{activities.map(item => <div key={item.id}><div><b>{item.name}</b><span>{duration(item.seconds)} <small className="goal-badge"><Trophy size={14} />Выполнено целей: {report.history.filter(s => s.activity === item.id).reduce((n, s) => n + (s.completedGoals?.length ?? 0), 0)}</small></span></div><div className="progress-track"><span style={{ width: item.seconds / Math.max(1, total) * 100 + '%' }} /></div></div>)}</div> : <p className="empty-inline">Здесь появится время ваших занятий.</p>}
         </section>
         <AchievementPreview awards={data.awards} open={openAchievements} />
       </div>
@@ -62,7 +62,7 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
         <div className="card-heading"><span className="card-icon"><History size={19} /></span><div><h2>История сессий</h2><p>Время и результаты завершённых сессий</p></div></div>
         {!history.length ? <p className="empty-inline">Завершённые сессии появятся здесь.</p> : <div className="history-list">{history.slice(0, limit).map(session => {
           const date = new Date(session.started * 1000)
-          return <div className="history-row" key={session.id}><div><b>{data.activities.find(item => item.id === session.activity)?.name ?? 'Занятие'}</b><small>{dayFormat.format(date)} · {timeFormat.format(date)}</small>{session.note && <p>{session.note}</p>}</div><span>{duration(session.spans.reduce((sum, [start, end]) => sum + end - start, 0))}</span></div>
+          return <div className="history-row" key={session.id}><div><b>{data.activities.find(item => item.id === session.activity)?.name ?? 'Занятие'}</b><small>{dayFormat.format(date)} · {timeFormat.format(date)}</small>{!!session.completedGoals?.length && <div className="goal-results"><span className="goal-badge"><Trophy size={16} />Цели достигнуты</span><ul>{session.completedGoals.map(g => <li key={g}>{g}</li>)}</ul></div>}{session.note && <p>{session.note}</p>}</div><span>{duration(session.spans.reduce((sum, [start, end]) => sum + end - start, 0))}</span></div>
         })}</div>}
         {history.length > limit && <button className="button secondary" onClick={() => setLimit(limit + 8)}>Ещё сессии</button>}
       </section>

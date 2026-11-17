@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import {
   Archive, BookOpen, Brain, BriefcaseBusiness, Check, ChevronDown, CodeXml, Dumbbell, Heart,
-  Languages, Layers, Music, Palette, Pencil, Plus, RotateCcw, Search, Sparkles, Target,
+  Flag, Languages, Layers, Music, Palette, Pencil, Plus, RotateCcw, Search, Sparkles, Target, Trash2, X,
 } from 'lucide-react'
 import { duration, type Activity, type ActivityDetails, type ActivityIcon, type ActivityColor, type ActivitySummaries } from './types'
 
@@ -19,6 +19,8 @@ const colors: Record<ActivityColor, string> = {
 const byName = new Intl.Collator('ru', { numeric: true })
 const dateTime = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })
 const matches = (activity: Activity, query: string) => activity.name.toLocaleLowerCase('ru').includes(query.trim().toLocaleLowerCase('ru'))
+const maxGoals = 100
+const maxGoalLength = 120
 
 export function ActivityMark({ activity, big = false }: { activity?: ActivityDetails; big?: boolean }) {
   const [Icon] = icons[activity?.icon ?? 'sparkles']
@@ -115,11 +117,63 @@ export function ActivityEditor({ activity, initialName, error, busy, close, save
   activity?: Activity; initialName: string; error: string; busy: boolean
   close: () => void; save: (details: ActivityDetails) => void
 }) {
-  const [details, setDetails] = useState<ActivityDetails>({ name: activity?.name ?? initialName, icon: activity?.icon ?? 'sparkles', color: activity?.color ?? 'violet' })
+  const [details, setDetails] = useState<ActivityDetails>({ goalsEnabled: activity?.goalsEnabled ?? false, goals: activity?.goals ?? [], name: activity?.name ?? initialName, icon: activity?.icon ?? 'sparkles', color: activity?.color ?? 'violet' })
+  const [draft, setDraft] = useState<{ index: number | null; name: string }>()
+  const addGoal = useRef<HTMLButtonElement>(null)
+  const editButtons = useRef(new Map<number, HTMLButtonElement>())
+  const draftErrorId = useId()
+  const goals = details.goals ?? []
+  const draftName = draft?.name.trim() ?? ''
+  const duplicate = goals.some((goal, index) => goal === draftName && index !== draft?.index)
+  const validDraft = !!draftName && !duplicate
+
+  function updatedGoals() {
+    if (!draft) return goals
+    if (draft.index === null) return [...goals, draftName]
+    return goals.map((goal, index) => index === draft.index ? draftName : goal)
+  }
+
+  function closeDraft() {
+    const index = draft?.index
+    setDraft(undefined)
+    requestAnimationFrame(() => {
+      const trigger = index == null ? addGoal.current : editButtons.current.get(index)
+      if (trigger && !trigger.disabled) trigger.focus()
+      else editButtons.current.get(goals.length - 1)?.focus()
+    })
+  }
+
+  function commitDraft() {
+    if (!validDraft || busy) return
+    setDetails({ ...details, goals: updatedGoals() })
+    closeDraft()
+  }
+
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    if (!busy && details.name.trim()) save(details)
+    if (!busy && details.name.trim() && (!draft || validDraft)) {
+      save({ ...details, goals: updatedGoals() })
+    }
   }
+
+  const nameEditor = draft && <div className="goal-name-editor">
+    <div className="goal-name-controls">
+      <input autoFocus aria-label={draft.index === null ? 'Новая цель' : 'Название цели'}
+        aria-invalid={duplicate || undefined} aria-describedby={duplicate ? draftErrorId : undefined}
+        maxLength={maxGoalLength} placeholder="Название цели" value={draft.name} disabled={busy}
+        onFocus={event => event.currentTarget.select()}
+        onChange={event => setDraft({ ...draft, name: event.target.value })}
+        onKeyDown={event => {
+          if (event.nativeEvent.isComposing) return
+          if (event.key === 'Enter') { event.preventDefault(); commitDraft() }
+          if (event.key === 'Escape') { event.preventDefault(); closeDraft() }
+        }} />
+      <button type="button" className="goal-icon goal-apply" title="Подтвердить цель" aria-label="Подтвердить цель" disabled={busy || !validDraft} onClick={commitDraft}><Check size={16} /></button>
+      <button type="button" className="goal-icon" title="Отменить правку цели" aria-label="Отменить правку цели" disabled={busy} onClick={closeDraft}><X size={16} /></button>
+    </div>
+    {duplicate && <p className="goal-name-error" id={draftErrorId} role="alert">Такая цель уже есть в занятии.</p>}
+  </div>
+
   return <form className="activity-editor" onSubmit={submit}>
     <ActivityMark activity={details} big />
     <h2>{activity ? 'Редактировать занятие' : 'Новое занятие'}</h2>
@@ -133,9 +187,55 @@ export function ActivityEditor({ activity, initialName, error, busy, close, save
     <fieldset><legend>Цвет</legend><div className="activity-color-grid">
       {(Object.keys(colors) as ActivityColor[]).map(color => <label className="appearance-color" data-color={color} key={color} title={colors[color]}><input type="radio" name="activity-color" aria-label={colors[color]} checked={details.color === color} onChange={() => setDetails({ ...details, color })} /><span><Check size={13} /></span></label>)}
     </div></fieldset>
+    <div className="goal-management">
+      <div className="goal-management-heading">
+        <Flag size={16} aria-hidden="true" />
+        <strong id="manage-activity-goals">Использовать цели</strong>
+        <button type="button" className="toggle" role="switch" aria-labelledby="manage-activity-goals"
+          aria-checked={!!details.goalsEnabled} disabled={busy || !!draft}
+          onClick={() => setDetails({ ...details, goalsEnabled: !details.goalsEnabled })}><span /></button>
+      </div>
+      {details.goalsEnabled && <div className="goal-management-body">
+        {goals.length > 0 && <ul className="goal-editor-list" aria-label="Активные цели">
+          {goals.map((goal, index) => <li key={goal} className="goal-editor-row">
+            {draft?.index === index ? nameEditor : <>
+              <button type="button" className="goal-rename" title="Переименовать цель" aria-label={`Переименовать цель «${goal}»`}
+                ref={element => { if (element) editButtons.current.set(index, element); else editButtons.current.delete(index) }}
+                disabled={busy || !!draft} onClick={() => setDraft({ index, name: goal })}>
+                <span>{goal}</span><Pencil size={13} aria-hidden="true" />
+              </button>
+              <button type="button" className="goal-icon goal-remove" title="Удалить цель" aria-label={`Удалить цель «${goal}»`}
+                disabled={busy || !!draft} onClick={() => {
+                  setDetails({ ...details, goals: goals.filter((_, position) => position !== index) })
+                  requestAnimationFrame(() => (editButtons.current.get(index) ?? addGoal.current)?.focus())
+                }}><Trash2 size={15} /></button>
+            </>}
+          </li>)}
+        </ul>}
+        {draft?.index === null ? nameEditor : goals.length < maxGoals && <button
+          ref={addGoal} type="button" className="goal-add" disabled={busy || !!draft}
+          onClick={() => setDraft({ index: null, name: '' })}><Plus size={16} />Добавить цель</button>}
+      </div>}
+    </div>
     {error && <p className="error" role="alert">{error}</p>}
-    <div className="dialog-actions"><button type="button" className="button secondary" disabled={busy} onClick={close}>Отмена</button><button className="button primary" disabled={busy || !details.name.trim()}>{activity ? 'Сохранить' : 'Создать'}</button></div>
+    <div className="dialog-actions"><button type="button" className="button secondary" disabled={busy} onClick={close}>Отмена</button><button className="button primary" disabled={busy || !details.name.trim() || (!!draft && !validDraft)}>{activity ? 'Сохранить' : 'Создать'}</button></div>
   </form>
+}
+
+function ActivityGoalSummary({ goals }: { goals: string[] }) {
+  if (!goals.length) return null
+  const [first, ...rest] = goals
+  return <div className="activity-goal-preview">
+    <div>{first}</div>
+    {rest.length > 0 && <details>
+      <summary title="Показать остальные цели">
+        <span className="goal-preview-more" aria-label={`Остальных целей: ${rest.length}`}>+{rest.length}</span>
+        <span className="goal-preview-less">Свернуть</span>
+        <ChevronDown size={12} aria-hidden="true" />
+      </summary>
+      <ul aria-label="Остальные активные цели">{rest.map(goal => <li key={goal}>{goal}</li>)}</ul>
+    </details>}
+  </div>
 }
 
 export function Activities({ activities, summaries, busy, create, edit, archive }: {
@@ -165,7 +265,10 @@ export function Activities({ activities, summaries, busy, create, edit, archive 
             const ArchiveIcon = item.archived ? RotateCcw : Archive
             const archiveLabel = item.archived ? 'Восстановить' : 'В архив'
             return <li className="activity-grid activity-row" key={item.id}>
-              <div className="activity-name"><ActivityMark activity={item} big /><strong>{item.name}</strong></div>
+              <div className="activity-name" data-color={item.color}>
+                <ActivityMark activity={item} big />
+                <div><strong>{item.name}</strong>{item.goalsEnabled && <ActivityGoalSummary goals={item.goals ?? []} />}</div>
+              </div>
               <span className="activity-total" aria-label={'Всего ' + duration(summary?.seconds ?? 0)}>{duration(summary?.seconds ?? 0)}</span>
               <span className="activity-last" aria-label={'Последняя активность: ' + last}>{last}</span>
               <div className="activity-row-actions"><button className="icon-button" disabled={busy} title="Редактировать" aria-label={'Редактировать «' + item.name + '»'} onClick={() => edit(item)}><Pencil size={15} /></button>

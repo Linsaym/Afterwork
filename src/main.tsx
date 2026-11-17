@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { desktop } from './desktop'
 import {
   Activity as Pulse, ArrowUpRight, BarChart3, Bell, Check, CircleAlert, Clock3,
-  Gamepad2, ImagePlus, Layers, LayoutGrid, LockKeyhole, Minus, Pause, Play, Plus, Settings2, ShieldCheck,
+  Flag, Gamepad2, ImagePlus, Layers, LayoutGrid, LockKeyhole, Minus, Pause, Play, Plus, Settings2, ShieldCheck,
   Square, Sun, Sunset, Timer, Trash2, Trophy, X, Zap,
 } from 'lucide-react'
 import '@fontsource-variable/inter'
@@ -39,6 +39,7 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [modal, setModal] = useState<Modal>()
+  const [completedGoals, setCompletedGoals] = useState<string[]>([])
   const [text, setText] = useState('')
   const [newAwards, setNewAwards] = useState<string[]>([])
   const [updateConfirmation, setUpdateConfirmation] = useState<string>()
@@ -101,7 +102,7 @@ function App() {
     await desktop.apply(action)
     return refresh()
   }
-  const showModal = (value: Modal) => { setText(''); setError(''); setModal(value) }
+  const showModal = (value: Modal) => { setCompletedGoals([]); setText(''); setError(''); setModal(value) }
   const closeModal = () => { if (!busy) { setModal(undefined); setError('') } }
   const updateGameIcon = (game: Game, reset = false) => void perform(async () => {
     const file = reset ? null : await desktop.chooseIcon()
@@ -122,13 +123,15 @@ function App() {
     event.preventDefault()
     void perform(async () => {
       if (!modal) return
-      if (modal.type === 'finish') await apply({ type: 'finish', note: text })
+      if (modal.type === 'finish') await apply({ type: 'finish', note: text, completedGoals })
       else if (modal.type === 'remove') await apply({ type: 'removeGame', path: modal.game.path })
       setModal(undefined)
     })
   }
 
   const win = desktop.window()
+  const activeActivity = data?.activities.find(activity => activity.id === data.active?.activity)
+  const finishGoals = activeActivity?.goalsEnabled ? activeActivity.goals ?? [] : []
   const runUpdate = (command: () => Promise<void>) => void perform(async () => { await command(); await refreshUpdates() })
   const confirmUpdate = () => {
     if (updateStatus?.phase === 'ready' && updateStatus.version) setUpdateConfirmation(updateStatus.version)
@@ -206,7 +209,29 @@ function App() {
       </div> : <form onSubmit={submitModal}>
         <span className="card-icon">{modal.type === 'finish' ? <Check size={18} /> : <Trash2 size={18} />}</span>
         <h2>{modal.type === 'finish' ? 'Завершение сессии' : 'Удалить игру?'}</h2>
-        {modal.type === 'finish' && <label className="field">Что удалось сделать? <span className="muted">По желанию</span><textarea autoFocus rows={4} maxLength={2000} value={text} placeholder="Запишите результат сессии…" onChange={event => setText(event.target.value)} /></label>}
+        {modal.type === 'finish' && <>
+          {finishGoals.length > 0 && <fieldset className="finish-goals" aria-labelledby="finish-goals-title" aria-describedby="finish-goals-hint">
+            <div className="finish-goals-heading">
+              <span className="finish-goals-icon"><Flag size={16} aria-hidden="true" /></span>
+              <div><strong id="finish-goals-title">Выполненные цели</strong><p id="finish-goals-hint">Отметьте цели, которых достигли за сессию.</p></div>
+              <output aria-label="Выбрано целей" className="finish-goals-count">{completedGoals.length} / {finishGoals.length}</output>
+            </div>
+            <div className="finish-goal-options">
+              {finishGoals.map((goal, index) => <label key={goal} className="finish-goal-option">
+                <input type="checkbox" autoFocus={index === 0} checked={completedGoals.includes(goal)} disabled={busy}
+                  onChange={event => {
+                    const checked = event.target.checked
+                    setCompletedGoals(previous => checked ? [...previous, goal] : previous.filter(item => item !== goal))
+                  }} />
+                <span>{goal}</span><span className="finish-goal-check" aria-hidden="true"><Check size={14} /></span>
+              </label>)}
+            </div>
+          </fieldset>}
+          <label className="field">
+            <span className="finish-note-title">Что удалось сделать? <span className="muted">По желанию</span></span>
+            <textarea autoFocus={!finishGoals.length} rows={3} maxLength={2000} value={text} placeholder="Запишите результат сессии…" onChange={event => setText(event.target.value)} />
+          </label>
+        </>}
         {modal.type === 'remove' && <p>Игра «{modal.game.name}» будет удалена из списка блокировки.</p>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="dialog-actions"><button className="button secondary" type="button" disabled={busy} onClick={closeModal}>Назад</button><button className={'button ' + (modal.type === 'remove' ? 'danger' : 'primary')} disabled={busy}>{modal.type === 'remove' ? 'Удалить' : 'Сохранить'}</button></div>
@@ -250,6 +275,7 @@ function Home({ data, busy, selection, select, run, add, finish, games }: {
         <div className="timer-body">
           <div className="timer-state"><span className={running ? 'state-dot running' : 'state-dot'} />{running ? 'СЕССИЯ ИДЁТ' : data.active ? 'НА ПАУЗЕ' : 'ГОТОВ К СТАРТУ'}</div>
           <div className="digits" aria-label={'Время: ' + stopwatch(data.elapsed)}>{stopwatch(data.elapsed).split(':').map((value, index) => <span key={index}>{index > 0 && <i>:</i>}{value}</span>)}</div>
+          {selected?.goalsEnabled && <ul className="goal-list">{selected.goals?.map(g => <li key={g}>{g}</li>)}</ul>}
           <div className="activity-line">
             <ActivityPicker activities={data.activities} summaries={data.activitySummaries} selected={selected} disabled={!!data.active || busy} choose={select} create={add} />
             <button className="icon-button activity-quick-create" title="Новое занятие" aria-label="Новое занятие" disabled={busy} onClick={() => add('')}><Plus size={17} /></button>

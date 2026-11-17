@@ -612,6 +612,7 @@ mod tests {
                 actions::apply(
                     data,
                     Action::Finish {
+                        completed_goals: Vec::new(),
                         note: "Новая сессия".into(),
                     },
                     rollover + 120,

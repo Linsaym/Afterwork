@@ -150,6 +150,16 @@ main { flex: 1; min-width: 0; overflow: auto; background: radial-gradient(ellips
 .game-statistics-heading button { margin-left: auto; }
 .game-statistics-charts { gap: 24px; margin-top: 20px; }
 .game-statistics-charts h3 { font-size: 14px; margin: 0; }
+.game-statistics-charts .distribution > div { --bar-color: #a78bfa; }
+.game-statistics-charts .distribution > div:nth-child(2) { --bar-color: #fbbf66; }
+.game-statistics-charts .distribution > div:nth-child(3) { --bar-color: #63d5ec; }
+.game-statistics-charts .distribution > div:nth-child(4) { --bar-color: #f48cb7; }
+.game-statistics-charts > div:last-child .distribution > div:first-child { --bar-color: #79dcb1; }
+.game-statistics-charts > div:last-child .distribution > div:nth-child(2) { --bar-color: #63d5ec; }
+.game-statistics-charts > div:last-child .distribution > div:nth-child(3) { --bar-color: #a78bfa; }
+.game-statistics-charts > div:last-child .distribution > div:nth-child(5) { --bar-color: #fbbf66; }
+.game-statistics-charts .progress-track span { background: var(--bar-color); }
+.game-statistics-charts .distribution b::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--bar-color); vertical-align: 1px; }
 .week-chart { display: flex; gap: 10px; margin-top: 21px; height: 166px; }
 .bar-column { flex: 1; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: end; }
 .bar-column small, .calendar small { font-size: 10px; color: var(--muted); }
@@ -206,3 +216,27 @@ dialog .error { margin-top: 10px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+.goal-list { list-style: none; padding: 0; font-size: 12px; opacity: .8; }
+.goal-list li { display: flex; gap: 6px; margin-top: 6px; overflow-wrap: anywhere; }
+.finish-goals { min-width: 0; margin: 0 0 18px; padding: 11px; border: 1px solid #3b314c; border-radius: 11px; background: #171420; }
+.finish-goals-heading { display: flex; align-items: center; gap: 9px; padding: 1px 2px 10px; }
+.finish-goals-icon { display: grid; place-items: center; flex: 0 0 30px; height: 30px; border-radius: 8px; background: #2e2342; color: #d3baff; }
+.finish-goals-heading strong { font-size: 13px; }
+.finish-goals-heading p { margin-top: 2px; font-size: 11px; }
+.finish-goals-count { margin-left: auto; align-self: start; flex-shrink: 0; padding: 3px 6px; border-radius: 6px; color: #d8c7f3; background: #2a213a; font-size: 11px; font-variant-numeric: tabular-nums; }
+.finish-goal-options { display: grid; gap: 5px; max-height: min(214px, 32vh); overflow: auto; overscroll-behavior: contain; }
+.finish-goal-option { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 37px; padding: 6px 9px; border: 1px solid #32293f; border-radius: 7px; background: #201b2c; color: #e4d9ef; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; cursor: pointer; transition: background .16s, border-color .16s; }
+.finish-goal-option:hover { border-color: #7b68a0; background: #292137; }
+.finish-goal-option:has(:checked) { border-color: #8e71c0; background: #33264a; color: #f4eaff; }
+.finish-goal-option:has(:focus-visible) { outline: 2px solid var(--purple); outline-offset: -2px; }
+.finish-goal-option:has(:disabled) { cursor: default; opacity: .65; }
+.finish-goal-option input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.finish-goal-check { display: grid; place-items: center; flex: 0 0 20px; height: 20px; border: 1px solid #736187; border-radius: 50%; color: #241433; }
+.finish-goal-check svg { visibility: hidden; }
+.finish-goal-option input:checked ~ .finish-goal-check { background: #c4a7f8; border-color: #c4a7f8; }
+.finish-goal-option input:checked ~ .finish-goal-check svg { visibility: visible; }
+.finish-note-title { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; }
+.goal-badge { display: inline-flex; align-items: center; gap: 6px; color: #b77918; background: #edb94218; border: 1px solid #dba53735; border-radius: 20px; padding: 4px 9px; font-size: 12px; }
+.goal-results { margin-top: 12px; overflow-wrap: anywhere; }
+.goal-results ul { padding-left: 20px; font-size: 13px; }

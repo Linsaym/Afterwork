@@ -1,12 +1,12 @@
 export type ActivityIcon = 'sparkles' | 'briefcase' | 'book' | 'code' | 'pencil' | 'palette' | 'music' | 'dumbbell' | 'languages' | 'brain' | 'target' | 'heart'
 export type ActivityColor = 'violet' | 'blue' | 'cyan' | 'green' | 'amber' | 'orange' | 'rose' | 'slate'
-export type ActivityDetails = { name: string; icon: ActivityIcon; color: ActivityColor }
+export type ActivityDetails = { goalsEnabled?: boolean; goals?: string[]; name: string; icon: ActivityIcon; color: ActivityColor }
 export type Activity = ActivityDetails & { id: number; archived: boolean }
 export type ActivitySummaries = Record<number, { seconds: number; lastActive: number }>
 export type Game = { path: string; name: string; source: string; catalog_id: string; aliases: string[]; excluded: boolean }
 export type GameSession = { id: number; game: string; start: number; end: number }
 export type GameIconStatus = { revision: string; custom: boolean }
-export type Session = { id: number; activity: number; started: number; running: number | null; spans: [number, number][]; note: string }
+export type Session = { id: number; activity: number; started: number; running: number | null; spans: [number, number][]; note: string; completedGoals?: string[] }
 export type Settings = { first: number; second: number; minutes: number; notifications: boolean }
 export type Report = { totals: { days: Record<string, number>; activities: Record<string, number> }; history: Session[] }
 export type Snapshot = {
@@ -21,7 +21,7 @@ export type Snapshot = {
 export type Action =
   | { type: 'start'; activity: number }
   | { type: 'pause' | 'resume' }
-  | { type: 'finish'; note: string }
+  | { type: 'finish'; note: string; completedGoals?: string[] }
   | { type: 'addActivity'; details: ActivityDetails }
   | { type: 'editActivity'; id: number; details: ActivityDetails }
   | { type: 'archiveActivity'; id: number; archived: boolean }
