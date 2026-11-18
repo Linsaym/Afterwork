@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { Activity, BarChart3, CalendarDays, Check, ChevronLeft, ChevronRight, Gamepad2, History, Trophy, X } from 'lucide-react'
+import { Activity, BarChart3, CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Gamepad2, History, Trophy, X } from 'lucide-react'
 import { AchievementPreview } from './achievements'
 import { Dialog } from './dialog'
 import { sessionName } from './games'
-import { dateKey, dateOf, duration, type Game, type GameSession, type Snapshot } from './types'
+import { dateKey, dateOf, duration, recordedSeconds, stopwatch, type Game, type GameSession, type Snapshot } from './types'
 
 const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const monthFormat = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' })
@@ -48,11 +48,50 @@ function CompletedGoals({ activity, history, close }: { activity: string; histor
   </Dialog>
 }
 
-export function Statistics({ data, openAchievements }: { data: Snapshot; openAchievements: () => void }) {
+function EditDuration({ seconds, save, close }: { seconds: number; save: (seconds: number) => Promise<unknown>; close: () => void }) {
+  const [value, setValue] = useState(() => stopwatch(seconds))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const parts = /^(\d+):([0-5]\d):([0-5]\d)$/.exec(value.trim())
+  const next = parts ? Number(parts[1]) * 3600 + Number(parts[2]) * 60 + Number(parts[3]) : NaN
+  const invalid = !Number.isSafeInteger(next) || next > seconds
+  const hint = Number.isNaN(next) ? 'Введите время в формате чч:мм:сс.'
+    : invalid ? 'Длительность можно только уменьшить.' : `До ${stopwatch(seconds)} · чч:мм:сс`
+
+  return <Dialog label="Длительность сессии" className="duration-dialog" close={() => { if (!saving) close() }}>
+    <header className="dialog-heading">
+      <span className="card-icon"><Clock3 size={19} aria-hidden="true" /></span>
+      <h2>Длительность сессии</h2>
+    </header>
+    <form onSubmit={async event => {
+      event.preventDefault()
+      if (saving || invalid || next === seconds) return
+      setSaving(true)
+      setError('')
+      try { await save(next); close() }
+      catch (cause) { setError(String(cause)); setSaving(false) }
+    }}>
+      <input className="duration-input" type="text" aria-label="Длительность в формате часы, минуты, секунды"
+        aria-describedby="duration-hint" aria-invalid={invalid} value={value} readOnly={saving}
+        onChange={event => setValue(event.target.value)} onFocus={event => event.currentTarget.select()} autoFocus />
+      <p id="duration-hint" className={invalid ? 'error' : undefined}>{hint}</p>
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="dialog-actions">
+        <button type="button" className="button secondary" disabled={saving} onClick={close}>Отмена</button>
+        <button type="submit" className="button primary" disabled={saving || invalid || next === seconds}>Сохранить</button>
+      </div>
+    </form>
+  </Dialog>
+}
+
+export function Statistics({ data, openAchievements, shortenSession }: {
+  data: Snapshot; openAchievements: () => void; shortenSession: (id: number, seconds: number) => Promise<unknown>
+}) {
   const today = dateOf(data.date)
   const [offset, setOffset] = useState(0)
   const [limit, setLimit] = useState(8)
   const [goalActivity, setGoalActivity] = useState<number>()
+  const [editingId, setEditingId] = useState<number>()
   const report = data.report
   const days = report?.totals.days ?? {}
   const week = Array.from({ length: 7 }, (_, index) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + index - 6, 12))
@@ -77,6 +116,7 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
   const selectedActivity = activities.find(item => item.id === goalActivity)
   const total = activities.reduce((sum, item) => sum + item.seconds, 0)
   const history = report ? [...report.history].reverse() : []
+  const editing = history.find(session => session.id === editingId)
   return <div className="page">
     <div className="heading"><div><h1>Статистика</h1><p>Время по занятиям, календарь активности и история сессий.</p></div></div>
     {!report ? <div className="loading">Загрузка статистики…</div> : <>
@@ -130,12 +170,16 @@ export function Statistics({ data, openAchievements }: { data: Snapshot; openAch
         <div className="card-heading"><span className="card-icon"><History size={19} /></span><div><h2>История сессий</h2><p>Время и результаты завершённых сессий</p></div></div>
         {!history.length ? <p className="empty-inline">Завершённые сессии появятся здесь.</p> : <div className="history-list">{history.slice(0, limit).map(session => {
           const date = new Date(session.started * 1000)
-          return <div className="history-row" key={session.id}><div><b>{data.activities.find(item => item.id === session.activity)?.name ?? 'Занятие'}</b><small>{dayFormat.format(date)} · {timeFormat.format(date)}</small>{!!session.completedGoals?.length && <div className="goal-results"><span className="goal-badge"><Trophy size={16} />Цели достигнуты</span><ul>{session.completedGoals.map(g => <li key={g}>{g}</li>)}</ul></div>}{session.note && <p>{session.note}</p>}</div><span>{duration(session.spans.reduce((sum, [start, end]) => sum + end - start, 0))}</span></div>
+          return <div className="history-row" key={session.id}><div><b>{data.activities.find(item => item.id === session.activity)?.name ?? 'Занятие'}</b><small>{dayFormat.format(date)} · {timeFormat.format(date)}</small>{!!session.completedGoals?.length && <div className="goal-results"><span className="goal-badge"><Trophy size={16} />Цели достигнуты</span><ul>{session.completedGoals.map(g => <li key={g}>{g}</li>)}</ul></div>}{session.note && <p>{session.note}</p>}</div><button type="button" className="history-duration" aria-haspopup="dialog"
+            aria-label={`Изменить длительность сессии · ${duration(recordedSeconds(session))}`}
+            disabled={recordedSeconds(session) === 0} onClick={() => setEditingId(session.id)}>{duration(recordedSeconds(session))}</button></div>
         })}</div>}
         {history.length > limit && <button className="button secondary" onClick={() => setLimit(limit + 8)}>Ещё сессии</button>}
       </section>
     </>}
     {selectedActivity?.goalsDone && <CompletedGoals activity={selectedActivity.name} history={selectedActivity.goalsDone} close={() => setGoalActivity(undefined)} />}
+    {editing && <EditDuration seconds={recordedSeconds(editing)} close={() => setEditingId(undefined)}
+      save={seconds => shortenSession(editing.id, seconds)} />}
   </div>
 }
 

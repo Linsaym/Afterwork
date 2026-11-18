@@ -22,6 +22,7 @@ export type Action =
   | { type: 'start'; activity: number }
   | { type: 'pause' | 'resume' }
   | { type: 'finish'; note: string; completedGoals?: string[] }
+  | { type: 'shortenSession'; id: number; seconds: number }
   | { type: 'addActivity'; details: ActivityDetails }
   | { type: 'editActivity'; id: number; details: ActivityDetails }
   | { type: 'archiveActivity'; id: number; archived: boolean }
@@ -39,3 +40,4 @@ export const duration = (seconds: number) => {
   return minutes >= 60 ? Math.floor(minutes / 60) + ' ч ' + pad(minutes % 60) + ' мин' : minutes + ' мин'
 }
 export const stopwatch = (seconds: number) => [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60].map(pad).join(':')
+export const recordedSeconds = (session: Session) => session.spans.reduce((sum, [start, end]) => sum + end - start, 0)

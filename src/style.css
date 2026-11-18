@@ -180,7 +180,10 @@ main { flex: 1; min-width: 0; overflow: auto; scrollbar-gutter: stable; backgrou
 .achievement { padding: 5px 0; }
 .history { margin-top: 14px; }
 .history-row { align-items: start; justify-content: space-between; }
-.history-row > span { white-space: nowrap; color: #c5adf7; font-size: 12px; }
+.history-row > span, .history-duration { white-space: nowrap; color: #c5adf7; font-size: 12px; }
+.history-duration { padding: 0; border: 0; background: none; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.history-duration:hover:enabled, .history-duration:focus-visible { text-decoration-line: underline; cursor: pointer; }
+.history-duration:disabled { opacity: 1; }
 .history-row p { font-size: 12px; margin-top: 7px; white-space: pre-wrap; overflow-wrap: anywhere; color: #d0c9dc; }
 .history-row > div { min-width: 0; overflow-wrap: anywhere; }
 dialog { width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); border: 1px solid #514366; border-radius: 15px; padding: 20px; background: #1b1826; color: #f1edf8; box-shadow: 0 20px 90px #000a; }
@@ -190,6 +193,16 @@ dialog p { font-size: 13px; color: var(--muted); line-height: 1.55; }
 dialog .error { margin-top: 10px; }
 .muted { color: var(--muted); font-weight: 450; }
 .dialog-actions { display: flex; justify-content: end; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.duration-dialog { width: min(330px, calc(100vw - 32px)); }
+.duration-dialog h2 { font-size: 17px; }
+.duration-input {
+  width: 100%; padding: 11px 12px; border: 1px solid #514366; border-radius: 9px;
+  background: #111119; color: #f2edf9; font-size: 25px; font-variant-numeric: tabular-nums;
+  letter-spacing: .08em; text-align: center;
+}
+.duration-input:focus { border-color: #ae90e6; }
+.duration-input[aria-invalid="true"] { border-color: #c27891; }
+.duration-dialog #duration-hint { margin-top: 7px; text-align: center; font-size: 12px; }
 .toast { position: fixed; z-index: 2; display: flex; align-items: center; gap: 8px; bottom: 16px; right: 16px; max-width: min(510px, 90vw); padding: 12px; background: #341f2e; border: 1px solid #654051; color: #f5d0dc; border-radius: 9px; font-size: 12px; }
 .toast svg { flex-shrink: 0; }
 .toast button { background: transparent; border: 0; display: grid; place-items: center; }

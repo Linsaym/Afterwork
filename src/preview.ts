@@ -1,5 +1,5 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
-import { dateKey, type Action, type Session, type Snapshot } from './types'
+import { dateKey, recordedSeconds, type Action, type Session, type Snapshot } from './types'
 import type { UpdateStatus } from './desktop'
 import updateFixture from '../fixtures/ipc-update-status.json'
 import { version } from '../package.json'
@@ -162,6 +162,20 @@ export function installPreview() {
         history.push({ ...session, finished: time, note: action.note })
         data.active = null
         break
+      case 'shortenSession': {
+        const completed = history.find(item => item.id === action.id && item.running === null)
+        if (!completed) throw new Error('Завершённая сессия не найдена.')
+        if (!Number.isSafeInteger(action.seconds) || action.seconds < 0 || action.seconds > recordedSeconds(completed)) {
+          throw new Error('Длительность можно только уменьшить.')
+        }
+        let remaining = action.seconds
+        completed.spans = completed.spans.flatMap(([start, end]) => {
+          const kept = Math.min(remaining, end - start)
+          remaining -= kept
+          return kept > 0 ? [[start, start + kept]] : []
+        })
+        break
+      }
       case 'addActivity':
         data.activities.push({ ...action.details, id: nextId++, archived: false })
         break
@@ -194,7 +208,7 @@ export function installPreview() {
         for (const [id, { current, target }] of Object.entries(achievementProgress)) {
           if (current >= target) data.awards[id] ??= time
         }
-        const elapsed = (session: Session) => session.spans.reduce((sum, [start, end]) => sum + end - start, 0)
+        const elapsed = (session: Session) => recordedSeconds(session)
           + (session.running === null ? 0 : time - session.running)
         for (const session of data.active ? [...history, data.active] : history) {
           const summary = summaries[session.activity] ??= { seconds: 0, lastActive: 0 }

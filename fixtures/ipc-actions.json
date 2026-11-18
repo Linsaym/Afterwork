@@ -17,6 +17,11 @@
     ]
   },
   {
+    "type": "shortenSession",
+    "id": 8,
+    "seconds": 900
+  },
+  {
     "type": "addActivity",
     "details": {
       "name": "Тест",

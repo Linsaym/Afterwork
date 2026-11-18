@@ -168,7 +168,8 @@ function App() {
               await apply({ type: 'archiveActivity', id: activity.id, archived: !activity.archived })
               if (!activity.archived && selection === activity.id) setSelection(undefined)
             })} />}
-          {page === 'statistics' && <Statistics data={data} openAchievements={() => setPage('achievements')} />}
+          {page === 'statistics' && <Statistics data={data} openAchievements={() => setPage('achievements')}
+            shortenSession={(id, seconds) => apply({ type: 'shortenSession', id, seconds })} />}
           {page === 'achievements' && <Achievements data={data} />}
           {page === 'games' && <Games data={data} busy={busy} editIcon={game => showModal({ type: 'icon', game })} remove={game => showModal({ type: 'remove', game })} exclude={game => void perform(async () => {
             await apply({ type: 'excludeGame', path: game.path, excluded: !game.excluded })

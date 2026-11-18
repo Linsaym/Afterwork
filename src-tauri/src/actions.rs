@@ -20,6 +20,10 @@ pub enum Action {
         #[serde(default, rename = "completedGoals")]
         completed_goals: Vec<String>,
     },
+    ShortenSession {
+        id: u64,
+        seconds: i64,
+    },
     AddActivity {
         details: ActivityDetails,
     },
@@ -110,6 +114,24 @@ pub fn apply(data: &mut Data, action: Action, now: Timestamp) -> CommandResult<(
             session.completed_goals = completed_goals;
             data.history.push(session);
         }
+        Action::ShortenSession { id, seconds } => {
+            let session = data
+                .history
+                .iter_mut()
+                .find(|session| session.id == id && session.running.is_none())
+                .ok_or("Завершённая сессия не найдена.")?;
+            if !(0..=session.elapsed(now)).contains(&seconds) {
+                return Err("Длительность можно только уменьшить.".into());
+            }
+            // Keep the earliest worked intervals, including any gaps from pauses.
+            let mut remaining = seconds;
+            session.spans.retain_mut(|[start, end]| {
+                let kept = remaining.min(*end - *start);
+                *end = *start + kept;
+                remaining -= kept;
+                kept > 0
+            });
+        }
         Action::AddActivity { details } => {
             let details = data.validate_activity(details, None)?;
             let id = data.id();
@@ -170,8 +192,54 @@ pub fn apply(data: &mut Data, action: Action, now: Timestamp) -> CommandResult<(
 }
 
 #[cfg(test)]
-mod goal_tests {
+mod tests {
     use super::*;
+
+    #[test]
+    fn shortening_session_recalculates_time_across_day_boundary() {
+        let mut data = Data::default();
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
+        let boundary = crate::model::boundary(date, data.settings.first);
+        let now = boundary + 100;
+        let started = boundary - 30;
+        apply(&mut data, Action::Start { activity: 1 }, started).unwrap();
+        apply(&mut data, Action::Pause, boundary - 10).unwrap();
+        apply(&mut data, Action::Resume, boundary + 10).unwrap();
+        let id = data.active.as_ref().unwrap().id;
+        let shorten =
+            |data: &mut Data, seconds| apply(data, Action::ShortenSession { id, seconds }, now);
+        assert!(shorten(&mut data, 10).is_err());
+        apply(
+            &mut data,
+            Action::Finish {
+                note: "Заметка".into(),
+                completed_goals: Vec::new(),
+            },
+            now,
+        )
+        .unwrap();
+        assert_eq!(data.status(now).seconds, 90);
+        assert!(shorten(&mut data, 111).is_err());
+        assert!(shorten(&mut data, -1).is_err());
+        shorten(&mut data, 50).unwrap();
+        assert!(shorten(&mut data, 51).is_err());
+        assert_eq!(
+            data.history[0].spans,
+            [[started, boundary - 10], [boundary + 10, boundary + 40]]
+        );
+        assert_eq!(data.history[0].finished, Some(now));
+        assert_eq!(data.history[0].note, "Заметка");
+        assert_eq!(data.status(now).seconds, 30);
+        assert_eq!(data.activity_summaries(now)[&1].seconds, 50);
+        let stats = data.statistics(now);
+        assert_eq!(stats.activities[&1], 50);
+        assert_eq!(stats.days[&date.pred_opt().unwrap()], 20);
+        assert_eq!(stats.days[&date], 30);
+        shorten(&mut data, 0).unwrap();
+        assert!(data.history[0].spans.is_empty());
+        assert_eq!(data.status(now).seconds, 0);
+    }
+
     #[test]
     fn goals_preserve_history_and_legacy_roundtrip() {
         let mut data: Data =
