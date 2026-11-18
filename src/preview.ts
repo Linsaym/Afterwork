@@ -288,6 +288,7 @@ export function installPreview() {
       case 'autostart':
         if (typeof payload?.enabled === 'boolean') autostart = payload.enabled
         return autostart
+      case 'choose_game':
       case 'plugin:dialog|open': return null
       case 'plugin:window|minimize':
       case 'plugin:window|toggle_maximize':

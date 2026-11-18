@@ -163,7 +163,7 @@ impl IconStore {
             .unwrap_or_default()
     }
 
-    fn save(&self, game: &str, custom: bool, data: &[u8]) -> io::Result<()> {
+    pub(crate) fn save(&self, game: &str, custom: bool, data: &[u8]) -> io::Result<()> {
         self.load(game);
         let mut all = self
             .files
@@ -193,6 +193,17 @@ impl IconStore {
     fn active(&self, game: &str) -> Option<IconStatus> {
         self.files.lock().ok()?.get(game)?.status()
     }
+}
+
+#[tauri::command]
+pub async fn choose_game(window: tauri::WebviewWindow) -> CommandResult<Option<String>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let error = |_| "Не удалось открыть диалог выбора игры.".to_owned();
+        let owner = window.hwnd().map_err(error)?;
+        local::pick_game(owner).map_err(|_| "Не удалось выбрать файл игры.".to_owned())
+    })
+    .await
+    .map_err(|_| "Не удалось открыть диалог выбора игры.".to_owned())?
 }
 
 #[tauri::command]
@@ -258,7 +269,7 @@ struct CacheMeta {
 fn fingerprint(game: &Game) -> String {
     let mut digest = Sha256::new();
     digest.update(game.catalog_id.as_bytes());
-    for path in game.paths() {
+    for path in game.paths().chain(game.shortcut.as_deref()) {
         digest.update([0]);
         digest.update(path.as_bytes());
         if let Ok(meta) = fs::metadata(path) {
@@ -276,12 +287,40 @@ fn fingerprint(game: &Game) -> String {
     format!("{:x}", digest.finalize())
 }
 
+fn extracted(path: &Path, index: i32) -> Option<Vec<u8>> {
+    local::extract(path, index).and_then(|image| encode(DynamicImage::ImageRgba8(image)))
+}
+
+pub fn manual_target(path: &Path) -> CommandResult<(PathBuf, Option<(PathBuf, i32)>)> {
+    if path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("lnk"))
+    {
+        let (target, icon, index) =
+            local::selected_link(path).ok_or("Не удалось прочитать ярлык игры.")?;
+        Ok((target, Some((icon, index))))
+    } else {
+        Ok((path.to_owned(), None))
+    }
+}
+
+pub fn manual_icon(exe: &Path, icon: Option<(&Path, i32)>) -> Option<Vec<u8>> {
+    icon.and_then(|(path, index)| import(path).ok().or_else(|| extracted(path, index)))
+        .or_else(|| extracted(exe, 0))
+}
+
 fn local_icon(game: &Game, shortcuts: &mut Option<local::Shortcuts>) -> Option<Vec<u8>> {
-    let extracted = |path, index| {
-        local::extract(path, index).and_then(|image| encode(DynamicImage::ImageRgba8(image)))
-    };
-    game.paths()
-        .find_map(|path| extracted(Path::new(path), 0))
+    game.shortcut
+        .as_deref()
+        .and_then(|path| local::selected_link(Path::new(path)))
+        .filter(|(target, _, _)| {
+            local::local_file(target).is_some_and(|target| {
+                crate::game_catalog::path_key(&target)
+                    == crate::game_catalog::path_key(Path::new(&game.path))
+            })
+        })
+        .and_then(|(_, path, index)| import(&path).ok().or_else(|| extracted(&path, index)))
+        .or_else(|| game.paths().find_map(|path| extracted(Path::new(path), 0)))
         .or_else(|| local::steam_cache(game).find_map(|file| import(&file).ok()))
         .or_else(|| {
             shortcuts

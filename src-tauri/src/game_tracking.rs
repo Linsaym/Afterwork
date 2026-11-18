@@ -52,6 +52,7 @@ fn enroll(games: &mut Vec<Game>, entry: DetectedGame, path: String) -> bool {
             catalog_id: entry.id,
             aliases: Vec::new(),
             excluded: false,
+            shortcut: None,
         });
         true
     }

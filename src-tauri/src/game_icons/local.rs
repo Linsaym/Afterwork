@@ -20,6 +20,54 @@ use windows::{
         UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH},
     },
 };
+
+fn with_sta<T>(work: impl FnOnce() -> T) -> windows::core::Result<T> {
+    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()? };
+    struct Apartment;
+    impl Drop for Apartment {
+        fn drop(&mut self) {
+            unsafe { CoUninitialize() };
+        }
+    }
+    let _apartment = Apartment;
+    Ok(work())
+}
+
+pub fn pick_game(owner: windows::Win32::Foundation::HWND) -> windows::core::Result<Option<String>> {
+    use windows::{
+        core::{w, HRESULT},
+        Win32::{
+            Foundation::ERROR_CANCELLED,
+            System::Com::CoTaskMemFree,
+            UI::Shell::{
+                Common::COMDLG_FILTERSPEC, FileOpenDialog, IFileOpenDialog, FOS_FILEMUSTEXIST,
+                FOS_FORCEFILESYSTEM, FOS_NODEREFERENCELINKS, SIGDN_FILESYSPATH,
+            },
+        },
+    };
+    with_sta(|| unsafe {
+        let dialog: IFileOpenDialog =
+            CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+        dialog.SetTitle(w!("Выберите файл игры или ярлык"))?;
+        dialog.SetFileTypes(&[COMDLG_FILTERSPEC {
+            pszName: w!("Файлы игр и ярлыки (*.exe, *.lnk)"),
+            pszSpec: w!("*.exe;*.lnk"),
+        }])?;
+        dialog.SetOptions(
+            dialog.GetOptions()? | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM | FOS_NODEREFERENCELINKS,
+        )?;
+        match dialog.Show(Some(owner)) {
+            Err(error) if error.code() == HRESULT::from_win32(ERROR_CANCELLED.0) => {
+                return Ok(None)
+            }
+            result => result?,
+        }
+        let path = dialog.GetResult()?.GetDisplayName(SIGDN_FILESYSPATH)?;
+        let result = path.to_string();
+        CoTaskMemFree(Some(path.0.cast()));
+        Ok(Some(result?))
+    })?
+}
 use windows_sys::Win32::{
     Graphics::Gdi::{
         CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
@@ -270,10 +318,42 @@ impl Shortcuts {
 }
 
 fn read_lnk(path: &Path) -> Option<Shortcut> {
+    let (target, icon, index, arguments) = link_properties(path)?;
+    let icon = local_file(&icon)?;
+    if target
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("RiotClientServices.exe"))
+    {
+        let product = ["league_of_legends", "valorant"].into_iter().find(|name| {
+            arguments
+                .split_whitespace()
+                .any(|arg| arg == format!("--launch-product={name}"))
+        })?;
+        return Some(Shortcut {
+            game: LinkTarget::Catalog(format!("riot:{product}.live")),
+            icon,
+            index,
+        });
+    }
+    let target = local_file(&target)?;
+    Some(Shortcut {
+        game: LinkTarget::Executable(path_key(&target)),
+        icon,
+        index,
+    })
+}
+
+pub fn selected_link(path: &Path) -> Option<(PathBuf, PathBuf, i32)> {
+    let (target, icon, index, _) = with_sta(|| link_properties(path)).ok()??;
+    Some((target, icon, index))
+}
+
+fn link_properties(path: &Path) -> Option<(PathBuf, PathBuf, i32, String)> {
     let file = local_file(path)?;
     let raw = wide(file.as_os_str());
-    let mut target = [0u16; 1024];
-    let mut icon = [0u16; 1024];
+    let mut target = vec![0u16; 32_768];
+    let mut icon = vec![0u16; 32_768];
+    let mut arguments = [0u16; 1024];
     let mut index = 0;
     unsafe {
         let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
@@ -281,37 +361,21 @@ fn read_lnk(path: &Path) -> Option<Shortcut> {
         persist.Load(PCWSTR(raw.as_ptr()), STGM_READ).ok()?;
         link.GetPath(&mut target, null_mut(), SLGP_RAWPATH.0 as u32)
             .ok()?;
-        link.GetIconLocation(&mut icon, &mut index).ok()?;
-        let target = from_wide(&target);
-        if target
-            .file_name()
-            .is_some_and(|name| name.eq_ignore_ascii_case("RiotClientServices.exe"))
-        {
-            let mut arguments = [0u16; 1024];
-            link.GetArguments(&mut arguments).ok()?;
-            let arguments = String::from_utf16_lossy(
+        if link.GetIconLocation(&mut icon, &mut index).is_err() {
+            icon[0] = 0;
+        }
+        let _ = link.GetArguments(&mut arguments);
+        Some((
+            from_wide(&target),
+            from_wide(&icon),
+            index,
+            String::from_utf16_lossy(
                 arguments
                     .split(|&part| part == 0)
                     .next()
                     .unwrap_or_default(),
-            );
-            let product = ["league_of_legends", "valorant"].into_iter().find(|name| {
-                arguments
-                    .split_whitespace()
-                    .any(|arg| arg == format!("--launch-product={name}"))
-            })?;
-            return Some(Shortcut {
-                game: LinkTarget::Catalog(format!("riot:{product}.live")),
-                icon: local_file(&from_wide(&icon))?,
-                index,
-            });
-        }
-        let target = local_file(&target)?;
-        Some(Shortcut {
-            game: LinkTarget::Executable(path_key(&target)),
-            icon: local_file(&from_wide(&icon))?,
-            index,
-        })
+            ),
+        ))
     }
 }
 
@@ -415,5 +479,10 @@ mod tests {
                 matches!(candidate.game, LinkTarget::Executable(path) if path == path_key(&target))
             );
         }
+        let (exe, icon) = super::super::manual_target(&shortcut).unwrap();
+        assert_eq!(path_key(&exe), path_key(&target));
+        let (icon, index) = icon.unwrap();
+        let png = super::super::manual_icon(&exe, Some((&icon, index))).unwrap();
+        assert_eq!(image::load_from_memory(&png).unwrap().width(), SIZE);
     }
 }

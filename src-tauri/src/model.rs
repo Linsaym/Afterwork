@@ -140,6 +140,8 @@ pub struct Game {
     pub aliases: Vec<String>,
     #[serde(default)]
     pub excluded: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortcut: Option<String>,
 }
 
 impl Game {

@@ -37,6 +37,8 @@ pub enum Action {
     },
     AddGame {
         path: String,
+        #[serde(skip)]
+        shortcut: Option<String>,
     },
     RemoveGame {
         path: String,
@@ -146,7 +148,7 @@ pub fn apply(data: &mut Data, action: Action, now: Timestamp) -> CommandResult<(
             data.activity_mut(id)?.details = details;
         }
         Action::ArchiveActivity { id, archived } => data.activity_mut(id)?.archived = archived,
-        Action::AddGame { path } => {
+        Action::AddGame { path, shortcut } => {
             if data
                 .games
                 .iter()
@@ -166,6 +168,7 @@ pub fn apply(data: &mut Data, action: Action, now: Timestamp) -> CommandResult<(
                 catalog_id: String::new(),
                 aliases: Vec::new(),
                 excluded: false,
+                shortcut,
             });
         }
         Action::RemoveGame { path } => data

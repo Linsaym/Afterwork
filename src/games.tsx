@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { desktop } from './desktop'
 import { HistoryNavigation, useHistoryQuery } from './history'
-import { BarChart3, Check, EyeOff, Gamepad2, History, ImagePlus, Plus, ScanLine, Search, ShieldCheck, Trash2 } from 'lucide-react'
+import { BarChart3, Check, Ellipsis, EyeOff, Gamepad2, History, ImagePlus, Plus, ScanLine, Search, ShieldCheck, Trash2 } from 'lucide-react'
 import { duration, type Game, type GameIconStatus, type Snapshot } from './types'
 
 const periods = [{ key: 'day', label: 'День' }, { key: 'week', label: 'Неделя' }, { key: 'month', label: 'Месяц' }, { key: 'all', label: 'Всё время' }] as const
@@ -55,6 +55,65 @@ export function GameIcon({ path, status, large = false }: { path: string; status
   return <span className={'tracked-icon' + (large ? ' large' : '')} aria-hidden="true">
     {url ? <img src={url} alt="" draggable={false} onError={() => setAsset(undefined)} /> : <Gamepad2 size={large ? 28 : 19} />}
   </span>
+}
+
+function GameActions({ game, busy, statistics, editIcon, exclude, remove }: {
+  game: Game; busy: boolean; statistics: () => void
+  editIcon: (game: Game) => void; exclude: (game: Game) => void; remove: (game: Game) => void
+}) {
+  const id = useId()
+  const trigger = useRef<HTMLButtonElement>(null)
+  const popup = useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState(false)
+
+  function run(action: () => void) {
+    popup.current?.hidePopover()
+    trigger.current?.focus({ preventScroll: true })
+    action()
+  }
+
+  function position() {
+    const button = trigger.current
+    const menu = popup.current
+    if (!button || !menu) return
+    const { top, right, bottom } = button.getBoundingClientRect()
+    const roomBelow = window.innerHeight - bottom
+    const above = roomBelow < 180 && top > roomBelow
+    menu.style.right = Math.max(8, window.innerWidth - right) + 'px'
+    menu.style.top = above ? 'auto' : bottom + 6 + 'px'
+    menu.style.bottom = above ? window.innerHeight - top + 6 + 'px' : 'auto'
+    menu.style.maxHeight = Math.max(0, (above ? top : roomBelow) - 14) + 'px'
+  }
+
+  useEffect(() => {
+    if (!busy) return
+    popup.current?.hidePopover()
+  }, [busy])
+
+  useEffect(() => {
+    if (!open) return
+    window.addEventListener('resize', position)
+    window.addEventListener('scroll', position, true)
+    return () => {
+      window.removeEventListener('resize', position)
+      window.removeEventListener('scroll', position, true)
+    }
+  }, [open])
+
+  return <div className="tracked-actions">
+    <button ref={trigger} type="button" className="icon-button game-actions-button" popoverTarget={id}
+      disabled={busy} aria-label={'Действия для игры «' + game.name + '»'} onClick={position}>
+      <Ellipsis size={19} />
+    </button>
+    <div ref={popup} id={id} className="game-actions-popover" popover="auto" role="group" aria-label={'Действия для игры «' + game.name + '»'}
+      onToggle={event => setOpen(event.newState === 'open')}
+    >
+      <button type="button" onClick={() => run(statistics)}><BarChart3 size={16} />Показать статистику</button>
+      <button type="button" onClick={() => run(() => editIcon(game))}><ImagePlus size={16} />Изменить иконку</button>
+      <button type="button" onClick={() => run(() => exclude(game))}>{game.excluded ? <Check size={16} /> : <EyeOff size={16} />}{game.excluded ? 'Вернуть в активные' : 'Исключить'}</button>
+      {!game.catalog_id && <button type="button" className="game-actions-remove" onClick={() => run(() => remove(game))}><Trash2 size={16} />Удалить из списка</button>}
+    </div>
+  </div>
 }
 
 export function Games({ data, busy, add, remove, exclude, editIcon }: { data: Snapshot; busy: boolean; add: () => void; remove: (game: Game) => void; exclude: (game: Game) => void; editIcon: (game: Game) => void }) {
@@ -114,13 +173,14 @@ export function Games({ data, busy, add, remove, exclude, editIcon }: { data: Sn
         const playing = data.runningGames.includes(game.path)
         const failure = [game.path, ...game.aliases].map(path => data.failures[path]).find(Boolean)
         const blocked = !game.excluded && data.locked
+        const statistics = (path: string | undefined) => {
+          setSelected(path)
+          setHistoryPage(0)
+          chart.current?.focus({ preventScroll: true })
+          chart.current?.scrollIntoView({ block: 'start' })
+        }
         return <div className="tracked-row" key={game.path}>
-          <button className="tracked-name" aria-pressed={filtered === game.path} onClick={() => {
-            setSelected(filtered === game.path ? undefined : game.path)
-            setHistoryPage(0)
-            chart.current?.focus({ preventScroll: true })
-            chart.current?.scrollIntoView({ block: 'start' })
-          }} title={'Показать статистику игры · ' + pathLabel(game.path)}>
+          <button className="tracked-name" aria-pressed={filtered === game.path} onClick={() => statistics(filtered === game.path ? undefined : game.path)} title={'Показать статистику игры · ' + pathLabel(game.path)}>
             <GameIcon path={game.path} status={data.gameIcons?.[game.path]} /><span><b title={game.name}>{game.name}</b><small>{game.source || 'Вручную'}{playing && <em>Сейчас в игре</em>}</small></span>
           </button>
           <div className="tracked-meta"><b>{duration(summary?.seconds ?? 0)}</b><small>{playing ? 'Сессия идёт' : summary ? dateTime.format(summary.latest * 1000) : 'Сессий пока нет'}</small></div>
@@ -128,11 +188,7 @@ export function Games({ data, busy, add, remove, exclude, editIcon }: { data: Sn
             {game.excluded ? 'Исключена' : blocked ? failure ? 'Блокировка неполная' : 'Заблокирована' : 'Доступна'}
             {failure && <small>{failure}</small>}
           </span>
-          <div className="tracked-actions">
-            <button className="icon-button" disabled={busy} title="Изменить иконку" aria-label={'Изменить иконку «' + game.name + '»'} onClick={() => editIcon(game)}><ImagePlus size={16} /></button>
-            <button className="button secondary" disabled={busy} aria-label={(game.excluded ? 'Вернуть ' : 'Исключить ') + game.name} title={game.excluded ? 'Вернуть учёт и блокировку' : 'Отключить учёт и блокировку'} onClick={() => exclude(game)}>{game.excluded ? <Check size={14} /> : <EyeOff size={14} />}<span>{game.excluded ? 'Вернуть' : 'Исключить'}</span></button>
-            {!game.catalog_id && <button className="icon-button" disabled={busy} title="Удалить из списка" aria-label={'Удалить ' + game.name} onClick={() => remove(game)}><Trash2 size={15} /></button>}
-          </div>
+          <GameActions game={game} busy={busy} statistics={() => statistics(game.path)} editIcon={editIcon} exclude={exclude} remove={remove} />
         </div>
       })}</div> : <div className="empty"><ScanLine size={27} /><h3>{search ? 'Игры не найдены' : showExcluded ? 'Исключений пока нет' : 'Пока нет распознанных игр'}</h3><p>{search ? 'Попробуйте другое название.' : showExcluded ? 'Исключённые игры перестают учитываться и блокироваться.' : 'Запустите игру. Afterwork добавит её в список, если распознает.'}</p></div>}
       <HistoryNavigation page={visiblePage} more={(visiblePage + 1) * 50 < visibleGames.length} change={setCatalogPage} nextLabel="Ещё игры" />

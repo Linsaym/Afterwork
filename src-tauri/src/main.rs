@@ -504,27 +504,40 @@ fn make_snapshot(
 }
 
 #[tauri::command]
-fn apply(app: AppHandle, action: Action) -> CommandResult<()> {
-    apply_action(&app, action)
+async fn apply(app: AppHandle, action: Action) -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(move || apply_action(&app, action))
+        .await
+        .map_err(storage_error)?
 }
 
 fn apply_action(app: &AppHandle, action: Action) -> CommandResult<()> {
     let state = app.state::<Mutex<Engine>>();
     let mut engine = state.lock().map_err(storage_error)?;
     let now = model::now();
-    let action = match action {
-        Action::AddGame { path } => {
-            let path = engine.game_path(Path::new(&path))?;
+    if let Action::AddGame { path, .. } = action {
+        let (target, icon) = game_icons::manual_target(Path::new(&path))?;
+        let target = engine.game_path(&target)?;
+        let shortcut = icon.as_ref().map(|_| path);
+        let path = target
+            .to_str()
+            .ok_or("Имя файла содержит неподдерживаемые символы.")?;
+        engine.change_action(
             Action::AddGame {
-                path: path
-                    .to_str()
-                    .ok_or("Имя файла содержит неподдерживаемые символы.")?
-                    .into(),
-            }
+                path: path.into(),
+                shortcut,
+            },
+            now,
+        )?;
+        // The lock for a newly added game can deny the icon extractor's read access.
+        if let Some(png) = game_icons::manual_icon(
+            &target,
+            icon.as_ref().map(|(file, index)| (file.as_path(), *index)),
+        ) {
+            let _ = app.state::<game_icons::IconStore>().save(path, false, &png);
         }
-        other => other,
-    };
-    engine.change_action(action, now)?;
+    } else {
+        engine.change_action(action, now)?;
+    }
     engine.close_untracked_games(now);
     engine.sync_locks(now, true);
     engine.refresh_achievements(now);
@@ -717,6 +730,7 @@ fn main() {
             updates::check_update,
             updates::download_update,
             updates::install_update,
+            game_icons::choose_game,
             game_icons::game_icon,
             game_icons::set_game_icon
         ])
