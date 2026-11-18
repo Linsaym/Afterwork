@@ -4,10 +4,13 @@ mod achievements;
 mod actions;
 mod game_catalog;
 mod game_detector;
+mod game_history;
 mod game_icons;
 mod game_tracking;
 mod model;
+mod storage;
 mod updates;
+mod work_history;
 
 use actions::Action;
 use model::{ActivitySummary, Data, Game, GameSession, Session, Settings, Statistics, Timestamp};
@@ -15,7 +18,6 @@ use serde::Serialize;
 use std::{
     collections::{BTreeMap, HashMap},
     fs::{self, File, OpenOptions},
-    io::{BufWriter, Write},
     os::windows::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -34,7 +36,10 @@ const DEV_IDENTIFIER: &str = "app.afterwork.desktop.dev";
 
 struct Engine {
     data: Data,
-    file: PathBuf,
+    storage: storage::Storage,
+    work: work_history::WorkHistory,
+    work_revision: u64,
+    monitoring_dirty: Option<usize>,
     isolated: bool,
     locks: HashMap<String, File>,
     failures: HashMap<String, String>,
@@ -42,7 +47,9 @@ struct Engine {
     protected: Vec<PathBuf>,
     executable: PathBuf,
     game_tracking: game_tracking::GameTracking,
+    game_history: game_history::GameHistory,
     achievement_progress: BTreeMap<String, achievements::Progress>,
+    achievement_history: Option<achievements::History>,
     achievements_due: Timestamp,
     achievements_dirty: bool,
     achievement_day: Option<chrono::NaiveDate>,
@@ -50,25 +57,7 @@ struct Engine {
 
 impl Engine {
     fn load(directory: PathBuf) -> CommandResult<Self> {
-        fs::create_dir_all(&directory).map_err(storage_error)?;
-        let file = directory.join("afterwork.json");
-        let mut data: Data = match fs::read(&file) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map_err(storage_error)?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Data::default(),
-            Err(error) => return Err(storage_error(error)),
-        };
-        data.settings.validate()?;
-        let migrate = file.is_file() && data.achievement_goals.is_empty();
-        let now = model::now();
-        if migrate {
-            achievements::preserve_legacy_awards(&mut data, now);
-        }
-        if data.achievement_goals.is_empty() {
-            data.achievement_goals.insert(
-                achievements::day_of(now),
-                i64::from(data.settings.minutes) * 120,
-            );
-        }
+        let (storage, mut data) = storage::Storage::open(&directory)?;
         let protected = ["SystemRoot", "ProgramData"]
             .iter()
             .filter_map(std::env::var_os)
@@ -77,9 +66,14 @@ impl Engine {
         let executable = std::env::current_exe()
             .and_then(fs::canonicalize)
             .map_err(storage_error)?;
+        let work = work_history::WorkHistory::new(&data);
+        let game_history = game_history::GameHistory::new(std::mem::take(&mut data.game_sessions));
         let mut engine = Self {
             data,
-            file,
+            storage,
+            work,
+            work_revision: 0,
+            monitoring_dirty: None,
             isolated: false,
             locks: HashMap::new(),
             failures: HashMap::new(),
@@ -87,14 +81,14 @@ impl Engine {
             protected,
             executable,
             game_tracking: game_tracking::GameTracking::default(),
+            game_history,
             achievement_progress: BTreeMap::new(),
+            achievement_history: None,
             achievements_due: 0,
             achievements_dirty: true,
             achievement_day: None,
         };
-        if migrate {
-            let _ = engine.update(|_| Ok(()));
-        }
+        engine.refresh_game_paths();
         Ok(engine)
     }
 
@@ -112,7 +106,23 @@ impl Engine {
         {
             return;
         }
-        let progress = achievements::progress(&self.data, &self.game_report(), now);
+        if self
+            .achievement_history
+            .as_ref()
+            .is_none_or(|history| !history.is_valid(now))
+        {
+            self.achievement_history = Some(achievements::History::new(
+                &self.data,
+                self.game_history.iter(),
+                now,
+            ));
+        }
+        let progress = achievements::refresh(
+            self.achievement_history.as_ref().unwrap(),
+            &self.data,
+            self.game_tracking.live.values(),
+            now,
+        );
         let new = progress
             .iter()
             .filter(|(id, item)| item.current >= item.target && !self.data.awards.contains_key(*id))
@@ -130,19 +140,120 @@ impl Engine {
     }
 
     fn update(&mut self, change: impl FnOnce(&mut Data) -> CommandResult<()>) -> CommandResult<()> {
-        let mut next = self.data.clone();
+        let mut next = self.data.metadata();
         change(&mut next)?;
-        let mut temp =
-            tempfile::NamedTempFile::new_in(self.file.parent().unwrap()).map_err(storage_error)?;
-        {
-            let mut writer = BufWriter::new(temp.as_file_mut());
-            serde_json::to_writer(&mut writer, &next).map_err(storage_error)?;
-            writer.flush().map_err(storage_error)?;
+        self.commit(next, None, &[])
+    }
+
+    fn change_action(&mut self, action: Action, now: Timestamp) -> CommandResult<()> {
+        let mut next = self.data.metadata();
+        let position = match &action {
+            Action::ShortenSession { id, .. } => {
+                let position = *self
+                    .work
+                    .positions
+                    .get(id)
+                    .ok_or("Завершённая сессия не найдена.")?;
+                next.history.push(self.data.history[position].clone());
+                position
+            }
+            _ => self.data.history.len(),
+        };
+        let working = matches!(
+            &action,
+            Action::Start { .. }
+                | Action::Pause
+                | Action::Resume
+                | Action::ToggleTimer
+                | Action::Finish { .. }
+                | Action::ShortenSession { .. }
+                | Action::SaveSettings { .. }
+        );
+        let archives = !matches!(
+            &action,
+            Action::Start { .. }
+                | Action::Pause
+                | Action::Resume
+                | Action::ToggleTimer
+                | Action::Finish { .. }
+                | Action::EditActivity { .. }
+                | Action::ArchiveActivity { .. }
+        );
+        let finished = matches!(&action, Action::Finish { .. });
+        let games_changed = matches!(
+            &action,
+            Action::AddGame { .. } | Action::RemoveGame { .. } | Action::ExcludeGame { .. }
+        );
+        actions::apply(&mut next, action, now)?;
+        let changed = next.history.pop().map(|session| (position, session));
+        self.commit(next, changed, &[])?;
+        if games_changed {
+            self.refresh_game_paths();
         }
-        temp.as_file().sync_all().map_err(storage_error)?;
-        temp.persist(&self.file).map_err(storage_error)?;
-        self.data = next;
         self.achievements_dirty = true;
+        if archives {
+            self.achievement_history = None;
+        } else if finished {
+            if let Some(history) = &mut self.achievement_history {
+                history.append_work(&self.data, self.data.history.last().unwrap(), now);
+            }
+        }
+        if working {
+            self.work_revision += 1;
+        }
+        Ok(())
+    }
+
+    fn persist(
+        &mut self,
+        metadata: &Data,
+        focus: Option<(usize, &Session)>,
+        games: &[GameSession],
+    ) -> CommandResult<()> {
+        let from = self
+            .monitoring_dirty
+            .unwrap_or(self.data.game_monitoring.len());
+        self.storage.save(
+            metadata,
+            focus,
+            games,
+            (from, &self.data.game_monitoring[from..]),
+        )?;
+        self.monitoring_dirty = None;
+        Ok(())
+    }
+
+    fn commit(
+        &mut self,
+        mut next: Data,
+        focus: Option<(usize, Session)>,
+        games: &[GameSession],
+    ) -> CommandResult<()> {
+        let rebuild = next.settings.first != self.data.settings.first;
+        self.persist(
+            &next,
+            focus.as_ref().map(|(index, session)| (*index, session)),
+            games,
+        )?;
+        next.history = std::mem::take(&mut self.data.history);
+        next.game_monitoring = std::mem::take(&mut self.data.game_monitoring);
+        if let Some((index, session)) = focus {
+            if index < next.history.len() {
+                let old = std::mem::replace(&mut next.history[index], session);
+                if !rebuild {
+                    self.work.remove(&next.settings, index, &old);
+                }
+            } else {
+                next.history.push(session);
+            }
+            if !rebuild {
+                self.work.add(&next.settings, index, &next.history[index]);
+            }
+        }
+        if rebuild {
+            self.work = work_history::WorkHistory::new(&next);
+        }
+        self.data = next;
         Ok(())
     }
 
@@ -172,12 +283,20 @@ impl Engine {
     }
 
     fn sync_locks(&mut self, now: Timestamp, force: bool) {
-        if self.isolated || !self.data.status(now).locked() {
+        let locked = !self.isolated && self.work.status(&self.data, now).locked();
+        self.sync_locks_for_day(now, force, locked);
+    }
+
+    fn sync_locks_for_day(&mut self, now: Timestamp, force: bool, locked: bool) {
+        if self.isolated || !locked {
             self.locks.clear();
             self.failures.clear();
             return;
         }
-        if !force && now < self.retry_at && now >= self.retry_at - 3 {
+        if !force
+            && (now < self.retry_at && now >= self.retry_at - 3
+                || !self.locks.is_empty() && self.failures.is_empty())
+        {
             return;
         }
         self.retry_at = now + 3;
@@ -254,7 +373,9 @@ struct Snapshot {
     failures: HashMap<String, String>,
     blocked_count: usize,
     running_games: Vec<String>,
-    game_history: Option<Vec<GameSession>>,
+    game_revision: Option<u64>,
+    game_earliest: Option<Timestamp>,
+    work_revision: u64,
     game_icons: Option<HashMap<String, game_icons::IconStatus>>,
     awards: BTreeMap<String, Timestamp>,
     achievement_progress: Option<BTreeMap<String, achievements::Progress>>,
@@ -264,7 +385,46 @@ struct Snapshot {
 #[derive(Serialize)]
 struct Report {
     totals: Statistics,
-    history: Vec<Session>,
+    goals: BTreeMap<u64, usize>,
+}
+
+#[derive(Serialize)]
+struct FocusPage {
+    sessions: Vec<Session>,
+    more: bool,
+}
+
+#[tauri::command]
+fn focus_page(
+    state: State<'_, Mutex<Engine>>,
+    activity: Option<u64>,
+    offset: u32,
+    limit: u32,
+) -> CommandResult<FocusPage> {
+    let engine = state.lock().map_err(storage_error)?;
+    let limit = limit.clamp(1, 100);
+    let mut sessions = engine.storage.focus_page(activity, offset, limit + 1)?;
+    let more = sessions.len() > limit as usize;
+    sessions.truncate(limit as usize);
+    Ok(FocusPage { sessions, more })
+}
+
+#[tauri::command]
+fn game_report(
+    state: State<'_, Mutex<Engine>>,
+    filtered: Option<String>,
+    ranges: Vec<[Timestamp; 2]>,
+    offset: u32,
+    limit: u32,
+) -> CommandResult<game_history::GameReport> {
+    let mut state = state.lock().map_err(storage_error)?;
+    let Engine {
+        game_history,
+        game_tracking,
+        ..
+    } = &mut *state;
+    let live = game_tracking.live.values().collect::<Vec<_>>();
+    game_history.report(&live, filtered.as_deref(), &ranges, offset, limit)
 }
 
 #[tauri::command]
@@ -296,7 +456,7 @@ fn make_snapshot(
     achievements: Option<bool>,
 ) -> Snapshot {
     let data = &engine.data;
-    let status = data.status(now);
+    let status = engine.work.status(data, now);
     Snapshot {
         date: status.day.to_string(),
         seconds: status.seconds,
@@ -305,7 +465,7 @@ fn make_snapshot(
         locked: status.locked(),
         settings: data.settings.clone(),
         activities: data.activities.clone(),
-        activity_summaries: data.activity_summaries(now),
+        activity_summaries: engine.work.summaries(data, now),
         games: data.games.clone(),
         active: data.active.clone(),
         elapsed: data
@@ -321,15 +481,24 @@ fn make_snapshot(
             })
             .count(),
         running_games: engine.game_tracking.live.keys().cloned().collect(),
-        game_history: (report || games.unwrap_or(false)).then(|| engine.game_report()),
+        game_revision: (report || games.unwrap_or(false)).then_some(engine.game_tracking.revision),
+        game_earliest: games
+            .unwrap_or(false)
+            .then(|| {
+                engine
+                    .game_history
+                    .earliest(engine.game_tracking.live.values())
+            })
+            .flatten(),
+        work_revision: engine.work_revision,
         game_icons: games.unwrap_or(false).then(|| icons.status(&data.games)),
         awards: data.awards.clone(),
         achievement_progress: achievements
             .unwrap_or(false)
             .then(|| engine.achievement_progress.clone()),
         report: report.then(|| Report {
-            totals: data.statistics(now),
-            history: data.history.clone(),
+            totals: engine.work.totals(data, now),
+            goals: engine.work.goals.clone(),
         }),
     }
 }
@@ -355,7 +524,7 @@ fn apply_action(app: &AppHandle, action: Action) -> CommandResult<()> {
         }
         other => other,
     };
-    engine.update(|data| actions::apply(data, action, now))?;
+    engine.change_action(action, now)?;
     engine.close_untracked_games(now);
     engine.sync_locks(now, true);
     engine.refresh_achievements(now);
@@ -413,11 +582,12 @@ fn worker(app: AppHandle) {
         let notify = {
             let state = app.state::<Mutex<Engine>>();
             let Ok(mut engine) = state.lock() else { return };
-            engine.sync_locks(now, false);
+            let day = engine.work.status(&engine.data, now);
+            engine.sync_locks_for_day(now, false, day.locked());
             if now >= engine.achievements_due || now < engine.achievements_due - 5 {
                 engine.refresh_achievements(now);
             }
-            let slot = engine.data.status(now).reminder_slot(now);
+            let slot = day.reminder_slot(now);
             !engine.isolated
                 && engine.data.settings.notifications
                 && slot.is_some()
@@ -459,7 +629,6 @@ fn main() {
             let mut engine = Engine::load(directory).map_err(std::io::Error::other)?;
             engine.isolated = isolated;
             engine.sync_locks(model::now(), true);
-            engine.refresh_achievements(model::now());
             let timer_state = engine
                 .data
                 .active
@@ -539,6 +708,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             snapshot,
+            focus_page,
+            game_report,
             apply,
             autostart,
             updates::update_status,
@@ -571,7 +742,7 @@ mod tests {
             serde_json::from_str(include_str!("../../fixtures/ipc-snapshot.json")).unwrap();
         assert_eq!(serde_json::to_value(snapshot).unwrap(), expected);
         let statistics = make_snapshot(&engine, &icons, now, true, Some(false), None);
-        assert!(statistics.game_history.is_some());
+        assert!(statistics.game_revision.is_some());
         assert!(statistics.game_icons.is_none());
 
         let expected: Value =
@@ -599,7 +770,7 @@ mod tests {
             })
             .unwrap();
         engine
-            .update(|data| actions::apply(data, Action::Start { activity: 7 }, rollover - 60))
+            .change_action(Action::Start { activity: 7 }, rollover - 60)
             .unwrap();
         let mut reopened = Engine::load(dir.path().to_owned()).unwrap();
         assert!(!reopened.data.auto_update);
@@ -608,16 +779,13 @@ mod tests {
             Some(rollover - 60)
         );
         reopened
-            .update(|data| {
-                actions::apply(
-                    data,
-                    Action::Finish {
-                        completed_goals: Vec::new(),
-                        note: "Новая сессия".into(),
-                    },
-                    rollover + 120,
-                )
-            })
+            .change_action(
+                Action::Finish {
+                    completed_goals: Vec::new(),
+                    note: "Новая сессия".into(),
+                },
+                rollover + 120,
+            )
             .unwrap();
         let reopened = Engine::load(dir.path().to_owned()).unwrap();
         assert!(reopened.data.active.is_none());
@@ -627,5 +795,90 @@ mod tests {
         assert_eq!(totals.activities[&7], 260);
         assert_eq!(totals.days[&date.pred_opt().unwrap()], 60);
         assert_eq!(totals.days[&date], 120);
+    }
+
+    #[test]
+    fn large_history_keeps_snapshots_and_pages_bounded() {
+        use std::time::Instant;
+
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("afterwork.json");
+        let date = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
+        let end = model::boundary(date, 12 * 60);
+        let mut data = Data::default();
+        data.achievement_goals.insert(date, 5400);
+        for id in 1..=100_000 {
+            let started = end - (100_001 - id as i64) * 1800;
+            data.history.push(Session {
+                id,
+                activity: 1,
+                started,
+                running: None,
+                spans: vec![[started, started + 900]],
+                note: "Я".repeat(100),
+                finished: Some(started + 900),
+                completed_goals: vec!["Цель".into()],
+            });
+            if id % 5 == 0 {
+                data.game_sessions.push(GameSession {
+                    id: id + 100_000,
+                    game: "C:/Games/Example.exe".into(),
+                    start: started,
+                    end: started + 900,
+                    launched: Some(started),
+                });
+            }
+        }
+        data.next_id = 200_001;
+        serde_json::to_writer(
+            std::io::BufWriter::new(File::create(&legacy).unwrap()),
+            &data,
+        )
+        .unwrap();
+        let start = Instant::now();
+        let mut engine = Engine::load(dir.path().to_owned()).unwrap();
+        let import = start.elapsed();
+        let icons = game_icons::IconStore::new(dir.path().join("icons"));
+        let start = Instant::now();
+        let snapshot = make_snapshot(&engine, &icons, end, true, Some(false), None);
+        let bytes = serde_json::to_vec(&snapshot).unwrap().len();
+        let snapshot_time = start.elapsed();
+        assert!(bytes < 100_000, "snapshot: {bytes} bytes");
+        assert_eq!(snapshot.report.unwrap().goals[&1], 100_000);
+        assert_eq!(snapshot.seconds, data.status(end).seconds);
+        let page = engine.storage.focus_page(None, 8, 8).unwrap();
+        assert_eq!(page.first().unwrap().id, 99_992);
+        assert_eq!(
+            engine.storage.focus_page(Some(1), 99_999, 8).unwrap()[0].id,
+            1
+        );
+        let games = engine
+            .game_history
+            .report(&[], None, &[[end - 86400, end]], 0, 2)
+            .unwrap();
+        assert_eq!(games.sessions.len(), 2);
+        assert!(games.more);
+        assert_eq!(games.buckets, vec![9_000]);
+
+        let start = Instant::now();
+        engine
+            .change_action(Action::ShortenSession { id: 1, seconds: 40 }, end)
+            .unwrap();
+        let write = start.elapsed();
+        drop(engine);
+        let start = Instant::now();
+        let reopened = Engine::load(dir.path().to_owned()).unwrap();
+        let reload = start.elapsed();
+        assert_eq!(reopened.data.history.len(), 100_000);
+        assert_eq!(reopened.data.history[0].elapsed(end), 40);
+        assert_eq!(
+            reopened.work.totals(&reopened.data, end).activities[&1],
+            99_999 * 900 + 40
+        );
+        assert_eq!(reopened.game_history.iter().count(), 20_000);
+        let backup: Data =
+            serde_json::from_reader(std::io::BufReader::new(File::open(legacy).unwrap())).unwrap();
+        assert_eq!(backup.history[0].elapsed(end), 900);
+        eprintln!("100k focus/20k game: import={import:?}, reload={reload:?}, snapshot={snapshot_time:?} ({bytes} bytes), edit={write:?}");
     }
 }

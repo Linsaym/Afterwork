@@ -315,7 +315,7 @@ button.goal-history-metric:hover { color: #e4cffd; }
 .session-goals { margin-top: 15px; }
 .session-goals summary { display: flex; align-items: center; gap: 10px; min-height: 47px; padding: 8px 17px; border-radius: inherit; cursor: pointer; list-style: none; font-size: 13px; }
 .session-goals summary::-webkit-details-marker { display: none; }
-.session-goals summary:hover { background: #211b2e; }
+/*.session-goals summary:hover { background: #211b2e; }*/
 .session-goals summary svg { flex-shrink: 0; color: var(--purple); }
 .session-goals summary span { padding: 2px 6px; border-radius: 5px; background: #282235; color: var(--muted); }
 .session-goals-chevron { margin-left: auto; }
@@ -358,3 +358,4 @@ dialog:has(> .activity-editor, > .session-dialog) { padding: 0; overflow: hidden
   .form-footer { justify-content: space-between; }
   .activity-distribution-row { column-gap: 7px; }
 }
+.history-navigation { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 10px; }

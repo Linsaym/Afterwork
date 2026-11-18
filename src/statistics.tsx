@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Activity, BarChart3, CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Gamepad2, History, Trophy, X } from 'lucide-react'
 import { AchievementPreview } from './achievements'
 import { Dialog } from './dialog'
+import { desktop } from './desktop'
 import { sessionName } from './games'
-import { dateKey, dateOf, duration, recordedSeconds, stopwatch, type Game, type GameSession, type Snapshot } from './types'
+import { HistoryNavigation, useHistoryQuery } from './history'
+import { dateKey, dateOf, duration, recordedSeconds, stopwatch, type Game, type GameTotals, type Snapshot } from './types'
 
 const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const monthFormat = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' })
@@ -12,11 +14,13 @@ const timeFormat = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '
 const completionDateFormat = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long' })
 
 type GoalCompletion = { sessionId: number; time: number; names: string[] }
-type GoalHistory = { count: number; completions: GoalCompletion[] }
-
-function CompletedGoals({ activity, history, close }: { activity: string; history: GoalHistory; close: () => void }) {
+function CompletedGoals({ activity, id, count, revision, close }: { activity: string; id: number; count: number; revision: number; close: () => void }) {
+  const [page, setPage] = useState(0)
+  const query = useCallback(() => desktop.focusPage(id, page * 24, 24), [id, page])
+  const history = useHistoryQuery(query, revision)
   const days = new Map<string, { date: Date; completions: GoalCompletion[] }>()
-  for (const completion of [...history.completions].sort((a, b) => b.time - a.time || b.sessionId - a.sessionId)) {
+  for (const session of history?.value?.sessions ?? []) {
+    const completion = { sessionId: session.id, time: session.finished ?? session.spans.reduce((last, [, end]) => Math.max(last, end), session.started), names: session.completedGoals ?? [] }
     const date = new Date(completion.time * 1000)
     const key = dateKey(date)
     const day = days.get(key)
@@ -31,6 +35,7 @@ function CompletedGoals({ activity, history, close }: { activity: string; histor
       <button type="button" className="icon-button" aria-label="Закрыть историю целей" onClick={close}><X size={17} /></button>
     </header>
     <div className="goal-history-scroll" tabIndex={0} role="region" aria-label="Выполненные цели по датам">
+      {!history?.value && <p className="empty-inline">{history?.error ?? 'Загрузка выполненных целей…'}</p>}
       {[...days].map(([key, { date, completions }]) => <section className="goal-history-day" key={key}>
         <h3><CalendarDays size={14} aria-hidden="true" /><time dateTime={key}>{completionDateFormat.format(date)}</time></h3>
         <ul className="goal-history-entries">
@@ -44,7 +49,8 @@ function CompletedGoals({ activity, history, close }: { activity: string; histor
         </ul>
       </section>)}
     </div>
-    <footer className="goal-history-footer">Выполнено целей: <strong>{history.count}</strong></footer>
+    <HistoryNavigation page={page} more={!!history?.value?.more} change={setPage} />
+    <footer className="goal-history-footer">Выполнено целей: <strong>{count}</strong></footer>
   </Dialog>
 }
 
@@ -89,7 +95,7 @@ export function Statistics({ data, openAchievements, shortenSession }: {
 }) {
   const today = dateOf(data.date)
   const [offset, setOffset] = useState(0)
-  const [limit, setLimit] = useState(8)
+  const [page, setPage] = useState(0)
   const [goalActivity, setGoalActivity] = useState<number>()
   const [editingId, setEditingId] = useState<number>()
   const report = data.report
@@ -101,21 +107,15 @@ export function Statistics({ data, openAchievements, shortenSession }: {
   const month = new Date(today.getFullYear(), today.getMonth() + offset, 1, 12)
   const empty = (month.getDay() + 6) % 7
   const monthLength = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
-  const goalHistory = new Map<number, GoalHistory>()
-  for (const session of report?.history ?? []) {
-    if (!session.completedGoals?.length) continue
-    const entry = goalHistory.get(session.activity) ?? { count: 0, completions: [] }
-    const time = session.finished ?? session.spans.reduce((last, [, end]) => Math.max(last, end), session.started)
-    entry.count += session.completedGoals.length
-    entry.completions.push({ sessionId: session.id, time, names: session.completedGoals })
-    goalHistory.set(session.activity, entry)
-  }
   const activities = data.activities.map(item => ({
-    ...item, seconds: report?.totals.activities[item.id] ?? 0, goalsDone: goalHistory.get(item.id),
+    ...item, seconds: report?.totals.activities[item.id] ?? 0, goalsDone: report?.goals[item.id] ?? 0,
   })).filter(item => item.seconds > 0 || item.goalsDone).sort((a, b) => b.seconds - a.seconds)
   const selectedActivity = activities.find(item => item.id === goalActivity)
   const total = activities.reduce((sum, item) => sum + item.seconds, 0)
-  const history = report ? [...report.history].reverse() : []
+  const query = useCallback(() => desktop.focusPage(null, page * 8, 8), [page])
+  const result = useHistoryQuery(query, report ? data.workRevision : null)
+  const history = result?.value?.sessions ?? []
+  const activitiesById = useMemo(() => new Map(data.activities.map(item => [item.id, item.name])), [data.activities])
   const editing = history.find(session => session.id === editingId)
   return <div className="page">
     <div className="heading"><div><h1>Статистика</h1><p>Время по занятиям, календарь активности и история сессий.</p></div></div>
@@ -153,9 +153,9 @@ export function Statistics({ data, openAchievements, shortenSession }: {
               <b>{item.name}</b>
               <span className="activity-distribution-duration">{duration(item.seconds)}</span>
               {item.goalsDone ? <button type="button" className="goal-history-metric" aria-haspopup="dialog"
-                aria-label={`Выполнено целей: ${item.goalsDone.count}. Занятие «${item.name}»`}
+                aria-label={`Выполнено целей: ${item.goalsDone}. Занятие «${item.name}»`}
                 title="Посмотреть выполненные цели" onClick={() => setGoalActivity(item.id)}>
-                <Check size={13} aria-hidden="true" /><span>Цели: {item.goalsDone.count}</span>
+                <Check size={13} aria-hidden="true" /><span>Цели: {item.goalsDone}</span>
               </button> : <span className="goal-history-metric" title="Выполнено целей: 0" aria-label="Выполнено целей: 0">
                 <Check size={13} aria-hidden="true" /><span>Цели: 0</span>
               </span>}
@@ -165,19 +165,19 @@ export function Statistics({ data, openAchievements, shortenSession }: {
         </section>
         <AchievementPreview awards={data.awards} open={openAchievements} />
       </div>
-      <GameStatistics history={data.gameHistory} games={data.games} />
+      <GameStatistics revision={data.gameRevision} games={data.games} />
       <section className="panel list-panel history">
         <div className="card-heading"><span className="card-icon"><History size={19} /></span><div><h2>История сессий</h2><p>Время и результаты завершённых сессий</p></div></div>
-        {!history.length ? <p className="empty-inline">Завершённые сессии появятся здесь.</p> : <div className="history-list">{history.slice(0, limit).map(session => {
+        {!history.length ? <p className="empty-inline">{result?.error ?? (result?.value ? 'Завершённые сессии появятся здесь.' : 'Загрузка истории…')}</p> : <div className="history-list">{history.map(session => {
           const date = new Date(session.started * 1000)
-          return <div className="history-row" key={session.id}><div><b>{data.activities.find(item => item.id === session.activity)?.name ?? 'Занятие'}</b><small>{dayFormat.format(date)} · {timeFormat.format(date)}</small>{!!session.completedGoals?.length && <div className="goal-results"><span className="goal-badge"><Trophy size={16} />Цели достигнуты</span><ul>{session.completedGoals.map(g => <li key={g}>{g}</li>)}</ul></div>}{session.note && <p>{session.note}</p>}</div><button type="button" className="history-duration" aria-haspopup="dialog"
+          return <div className="history-row" key={session.id}><div><b>{activitiesById.get(session.activity) ?? 'Занятие'}</b><small>{dayFormat.format(date)} · {timeFormat.format(date)}</small>{!!session.completedGoals?.length && <div className="goal-results"><span className="goal-badge"><Trophy size={16} />Цели достигнуты</span><ul>{session.completedGoals.map(g => <li key={g}>{g}</li>)}</ul></div>}{session.note && <p>{session.note}</p>}</div><button type="button" className="history-duration" aria-haspopup="dialog"
             aria-label={`Изменить длительность сессии · ${duration(recordedSeconds(session))}`}
             disabled={recordedSeconds(session) === 0} onClick={() => setEditingId(session.id)}>{duration(recordedSeconds(session))}</button></div>
         })}</div>}
-        {history.length > limit && <button className="button secondary" onClick={() => setLimit(limit + 8)}>Ещё сессии</button>}
+        <HistoryNavigation page={page} more={!!result?.value?.more} change={setPage} />
       </section>
     </>}
-    {selectedActivity?.goalsDone && <CompletedGoals activity={selectedActivity.name} history={selectedActivity.goalsDone} close={() => setGoalActivity(undefined)} />}
+    {!!selectedActivity?.goalsDone && <CompletedGoals activity={selectedActivity.name} id={selectedActivity.id} count={selectedActivity.goalsDone} revision={data.workRevision} close={() => setGoalActivity(undefined)} />}
     {editing && <EditDuration seconds={recordedSeconds(editing)} close={() => setEditingId(undefined)}
       save={seconds => shortenSession(editing.id, seconds)} />}
   </div>
@@ -186,29 +186,20 @@ export function Statistics({ data, openAchievements, shortenSession }: {
 const gameChartPreference = 'afterwork.hideGameCharts'
 const timeOfDay = ['Ночь · 00:00–06:00', 'Утро · 06:00–12:00', 'День · 12:00–18:00', 'Вечер · 18:00–00:00']
 
-function summarizeGames(history: GameSession[], games: Game[]) {
+function summarizeGames(totals: Record<string, GameTotals>, games: Game[]) {
   const secondsByTime = timeOfDay.map(() => 0)
   const gamesByPath = new Map(games.flatMap(game => [game.path, ...game.aliases].map(path => [path, game] as const)))
   const playCounts = new Map<string, { name: string; count: number; seconds: number }>()
-  for (const { game: path, start, end } of history) {
-    if (!Number.isFinite(new Date(start * 1000).getTime()) || !Number.isFinite(new Date(end * 1000).getTime()) || end <= start) continue
+  for (const [path, { count, seconds, buckets }] of Object.entries(totals)) {
+    if (!count) continue
     const game = gamesByPath.get(path)
     const key = game?.path ?? path
     const entry = playCounts.get(key) ?? { name: game?.name ?? sessionName(path), count: 0, seconds: 0 }
-    entry.count += 1
-    entry.seconds += end - start
+    entry.count += count
+    entry.seconds += seconds
     playCounts.set(key, entry)
 
-    // Split a session at local time boundaries, including midnight.
-    for (let cursor = start; cursor < end;) {
-      const local = new Date(cursor * 1000)
-      const bucket = Math.floor(local.getHours() / 6)
-      const boundary = new Date(local.getFullYear(), local.getMonth(), local.getDate(), (bucket + 1) * 6).getTime() / 1000
-      if (!Number.isFinite(boundary) || boundary <= cursor) break
-      const next = Math.min(end, boundary)
-      secondsByTime[bucket] += next - cursor
-      cursor = next
-    }
+    buckets.forEach((seconds, index) => { secondsByTime[index] += seconds })
   }
   const topGames = [...playCounts].sort(([, a], [, b]) =>
     b.count - a.count || b.seconds - a.seconds || a.name.localeCompare(b.name, 'ru'),
@@ -216,13 +207,16 @@ function summarizeGames(history: GameSession[], games: Game[]) {
   return { secondsByTime, topGames }
 }
 
-function GameStatistics({ history, games }: { history: GameSession[] | null; games: Game[] }) {
+function GameStatistics({ revision, games }: { revision: number | null; games: Game[] }) {
   const [hidden, setHidden] = useState(() => localStorage.getItem(gameChartPreference) === 'true')
   const toggle = () => {
     localStorage.setItem(gameChartPreference, String(!hidden))
     setHidden(!hidden)
   }
-  const summary = !hidden && history ? summarizeGames(history, games) : null
+  const query = useCallback(() => desktop.gameReport(null, [], 0, 1), [])
+  const report = useHistoryQuery(query, hidden ? null : revision)
+  const totals = report?.value?.totals
+  const summary = useMemo(() => totals ? summarizeGames(totals, games) : null, [totals, games])
   const longest = Math.max(1, ...(summary?.secondsByTime ?? []))
 
   return <section className="panel list-panel history">
@@ -234,7 +228,7 @@ function GameStatistics({ history, games }: { history: GameSession[] | null; gam
       </button>
     </div>
     <div id="game-statistics-charts" hidden={hidden}>
-      {!summary ? <p className="empty-inline">Загрузка игровой истории…</p> : !summary.topGames.length ? <p className="empty-inline">Диаграммы появятся после первой игровой сессии.</p> :
+      {!summary ? <p className="empty-inline">{report?.error ?? 'Загрузка игровой истории…'}</p> : !summary.topGames.length ? <p className="empty-inline">Диаграммы появятся после первой игровой сессии.</p> :
         <div className="stats-grid game-statistics-charts">
           <div>
             <h3>Игровое время по времени суток</h3>

@@ -31,8 +31,10 @@ struct Process {
     handle: HANDLE,
     created: Timestamp,
     path: PathBuf,
+    key: String,
     known: bool,
     last_rejection: Option<&'static str>,
+    rejected_as_foreground: Option<bool>,
 }
 
 impl Drop for Process {
@@ -77,8 +79,10 @@ impl Process {
             handle,
             created: 0,
             path: PathBuf::new(),
+            key: String::new(),
             known: false,
             last_rejection: None,
+            rejected_as_foreground: None,
         };
         if unsafe { WaitForSingleObject(handle, 0) } != WAIT_TIMEOUT {
             return None;
@@ -92,6 +96,7 @@ impl Process {
         let path = PathBuf::from(std::ffi::OsString::from_wide(&buffer[..len as usize]));
         // Canonical paths match the launcher catalog and the blocker, including junctions.
         process.path = fs::canonicalize(&path).unwrap_or(path);
+        process.key = path_key(&process.path);
         process.created = created;
         Some(process)
     }
@@ -152,6 +157,9 @@ impl Detector {
             self.catalog = Catalog::discover();
             discovered = self.catalog.launch_targets();
             self.next_catalog = Some(now + 120);
+            for process in self.processes.values_mut() {
+                process.rejected_as_foreground = None;
+            }
         }
 
         let mut running = Vec::new();
@@ -179,9 +187,9 @@ impl Detector {
         for (&pid, process) in &mut self.processes {
             let was_known = process.known;
             if !process.known && windows.visible.contains(&pid) {
-                if registered.contains(&path_key(&process.path)) {
+                if registered.contains(&process.key) {
                     process.known = true;
-                } else {
+                } else if process.rejected_as_foreground != Some(pid == windows.foreground) {
                     match self
                         .catalog
                         .identify(&process.path, pid == windows.foreground)
@@ -190,14 +198,13 @@ impl Detector {
                             process.known = true;
                             discovered.push(game);
                         }
-                        Err(reason)
-                            if crate::game_diagnostics()
-                                && process.last_rejection != Some(reason) =>
-                        {
-                            process.last_rejection = Some(reason);
-                            eprintln!("[Afterwork] {}: {reason}", process.path.display());
+                        Err(reason) => {
+                            process.rejected_as_foreground = Some(pid == windows.foreground);
+                            if crate::game_diagnostics() && process.last_rejection != Some(reason) {
+                                process.last_rejection = Some(reason);
+                                eprintln!("[Afterwork] {}: {reason}", process.path.display());
+                            }
                         }
-                        Err(_) => {}
                     }
                 }
             }

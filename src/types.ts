@@ -8,12 +8,15 @@ export type GameSession = { id: number; game: string; start: number; end: number
 export type GameIconStatus = { revision: string; custom: boolean }
 export type Session = { id: number; activity: number; started: number; running: number | null; spans: [number, number][]; note: string; finished?: number | null; completedGoals?: string[] }
 export type Settings = { first: number; second: number; minutes: number; notifications: boolean }
-export type Report = { totals: { days: Record<string, number>; activities: Record<string, number> }; history: Session[] }
+export type Report = { totals: { days: Record<string, number>; activities: Record<string, number> }; goals: Record<number, number> }
+export type HistoryPage<T> = { sessions: T[]; more: boolean }
+export type GameTotals = { count: number; seconds: number; latest: number; buckets: number[] }
+export type GameReport = HistoryPage<GameSession> & { totals: Record<string, GameTotals>; buckets: number[] }
 export type Snapshot = {
   date: string; seconds: number; phase: number; target: number; locked: boolean; settings: Settings
   activities: Activity[]; activitySummaries: ActivitySummaries; games: Game[]; active: Session | null; elapsed: number
   failures: Record<string, string>; blockedCount: number; report: Report | null
-  runningGames: string[]; gameHistory: GameSession[] | null
+  runningGames: string[]; gameRevision: number | null; gameEarliest: number | null; workRevision: number
   gameIcons: Record<string, GameIconStatus> | null
   awards: Record<string, number>
   achievementProgress: Record<string, { current: number; target: number }> | null

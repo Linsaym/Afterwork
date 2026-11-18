@@ -139,11 +139,15 @@ impl IconStore {
     }
 
     fn load(&self, game: &str) {
+        if self.files.lock().map_or(true, |all| all.contains_key(game)) {
+            return;
+        }
+        let loaded = Files {
+            custom: self.read_png(game, true).map(hash),
+            automatic: self.read_png(game, false).map(hash),
+        };
         if let Ok(mut all) = self.files.lock() {
-            all.entry(game.to_owned()).or_insert_with(|| Files {
-                custom: self.read_png(game, true).map(hash),
-                automatic: self.read_png(game, false).map(hash),
-            });
+            all.entry(game.to_owned()).or_insert(loaded);
         }
     }
 
@@ -243,6 +247,12 @@ struct CacheMeta {
     was_locked: bool,
     local_after: Timestamp,
     online_after: Timestamp,
+    #[serde(skip)]
+    check_after: Timestamp,
+    #[serde(skip)]
+    paths: Vec<String>,
+    #[serde(skip)]
+    found: bool,
 }
 
 fn fingerprint(game: &Game) -> String {
@@ -322,25 +332,35 @@ pub fn worker(app: AppHandle) {
                     .and_then(|bytes| serde_json::from_slice(&bytes).ok())
                     .unwrap_or_default()
             });
-            let found = store.png(&game.path, false).is_file();
-            let fingerprint = fingerprint(game);
-            let changed = entry.fingerprint != fingerprint;
-            let output_missing = entry.local && !found;
-            if changed
-                || output_missing
-                || !entry.local && (now >= entry.local_after || entry.was_locked && !locked)
+            if now >= entry.check_after
+                || now < entry.check_after - 60
+                || entry.was_locked && !locked
+                || !entry.paths.iter().map(String::as_str).eq(game.paths())
             {
-                if changed || output_missing {
-                    entry.online_after = 0;
+                entry.check_after = now + 60;
+                entry.paths = game.paths().map(str::to_owned).collect();
+                entry.found = store.png(&game.path, false).is_file();
+                let fingerprint = fingerprint(game);
+                let changed = entry.fingerprint != fingerprint;
+                let output_missing = entry.local && !entry.found;
+                if changed
+                    || output_missing
+                    || !entry.local && (now >= entry.local_after || entry.was_locked && !locked)
+                {
+                    if changed || output_missing {
+                        entry.online_after = 0;
+                    }
+                    entry.local = local_icon(game, &mut shortcuts)
+                        .is_some_and(|image| store.save(&game.path, false, &image).is_ok());
+                    entry.found |= entry.local;
+                    entry.fingerprint = fingerprint;
+                    entry.local_after = now + if *locked { 300 } else { 3_600 };
+                    entry.was_locked = *locked;
+                    write_meta(&store, &game.path, entry);
                 }
-                entry.local = local_icon(game, &mut shortcuts)
-                    .is_some_and(|image| store.save(&game.path, false, &image).is_ok());
-                entry.fingerprint = fingerprint;
                 entry.was_locked = *locked;
-                entry.local_after = now + if *locked { 300 } else { 3_600 };
-                write_meta(&store, &game.path, entry);
             }
-            if !found && !entry.local && now >= entry.online_after {
+            if !entry.found && !entry.local && now >= entry.online_after {
                 fetch.push(game);
             }
         }
@@ -355,7 +375,7 @@ pub fn worker(app: AppHandle) {
                 .as_ref()
                 .and_then(|client| online::fetch(client, game))
             {
-                let _ = store.save(&game.path, false, &image);
+                entry.found = store.save(&game.path, false, &image).is_ok();
             }
             entry.online_after = model::now() + 6 * 3_600;
             write_meta(&store, &game.path, entry);

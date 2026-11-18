@@ -8,7 +8,8 @@ export function useUpdates() {
   const refresh = useCallback(async () => {
     const id = ++request.current
     const next = await desktop.updateStatus()
-    if (id === request.current) setStatus(next)
+    if (id === request.current) setStatus(previous => previous &&
+      (Object.keys(next) as (keyof UpdateStatus)[]).every(key => previous[key] === next[key]) ? previous : next)
   }, [])
 
   useEffect(() => {

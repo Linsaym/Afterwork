@@ -33,6 +33,20 @@ type Page = typeof pages[number]['id']
 type Modal = { type: 'activity'; activity?: Activity; initialName: string; selectNew?: boolean } | { type: 'finish' } | { type: 'remove' | 'icon'; game: Game }
 const todayFormat = new Intl.DateTimeFormat('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })
 
+function reconcileSnapshot(previous: Snapshot | undefined, next: Snapshot) {
+  if (!previous) return next
+  let changed = false
+  for (const key of Object.keys(next) as (keyof Snapshot)[]) {
+    const before = previous[key]
+    const after = next[key]
+    if (Object.is(before, after)) continue
+    if (after && typeof after === 'object' && JSON.stringify(before) === JSON.stringify(after)) {
+      Object.assign(next, { [key]: before })
+    } else changed = true
+  }
+  return changed ? next : previous
+}
+
 function App() {
   const [page, setPage] = useState<Page>('home')
   const content = useRef<HTMLElement>(null)
@@ -49,21 +63,25 @@ function App() {
   const { status: updateStatus, refresh: refreshUpdates } = useUpdates()
   const knownAwards = useRef<Set<string> | undefined>(undefined)
   const sequence = useRef(0)
+  const fetching = useRef(0)
   const pending = useRef(false)
   const refresh = useCallback(async () => {
     const request = ++sequence.current
+    fetching.current = request
     try {
       const next = await desktop.snapshot({ report: page === 'statistics', games: page === 'games', achievements: page === 'achievements' })
-      if (request === sequence.current) setData(next)
+      if (request === sequence.current) setData(previous => reconcileSnapshot(previous, next))
       return next
     } catch (cause) {
       if (request === sequence.current) setError(String(cause))
+    } finally {
+      if (fetching.current === request) fetching.current = 0
     }
   }, [page])
 
   useEffect(() => {
     void refresh()
-    const update = () => { if (!document.hidden && !pending.current) void refresh() }
+    const update = () => { if (!document.hidden && !pending.current && !fetching.current) void refresh() }
     const interval = window.setInterval(update, page === 'home' ? 500 : 1500)
     document.addEventListener('visibilitychange', update)
     window.addEventListener('focus', update)

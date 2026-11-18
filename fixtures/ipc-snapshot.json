@@ -46,7 +46,9 @@
   "failures": {},
   "blockedCount": 0,
   "runningGames": [],
-  "gameHistory": [],
+  "gameRevision": 0,
+  "gameEarliest": null,
+  "workRevision": 0,
   "gameIcons": {},
   "awards": {},
   "achievementProgress": {},
@@ -55,6 +57,6 @@
       "days": {},
       "activities": {}
     },
-    "history": []
+    "goals": {}
   }
 }

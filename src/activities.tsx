@@ -1,4 +1,5 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { HistoryNavigation } from './history'
 import {
   Archive, BookOpen, Brain, BriefcaseBusiness, Check, ChevronDown, CodeXml, Dumbbell, Heart,
   Flag, Languages, Layers, Music, Palette, Pencil, Plus, RotateCcw, Search, Sparkles, Target, Trash2, X,
@@ -40,10 +41,14 @@ export function ActivityPicker({ activities, summaries, selected, disabled, choo
   const search = useRef<HTMLInputElement>(null)
   const listId = useId()
   const visible = expanded && !disabled
-  const matching = activities.filter(item => !item.archived && matches(item, query))
-  const recent = query.trim() ? [] : matching.filter(item => summaries[item.id])
-    .sort((a, b) => summaries[b.id].lastActive - summaries[a.id].lastActive || byName.compare(a.name, b.name)).slice(0, 4)
-  const others = matching.filter(item => !recent.some(entry => entry.id === item.id)).sort((a, b) => byName.compare(a.name, b.name))
+  const { matching, recent, others } = useMemo(() => {
+    if (!visible) return { matching: [], recent: [], others: [] }
+    const matching = activities.filter(item => !item.archived && matches(item, query))
+    const recent = query.trim() ? [] : matching.filter(item => summaries[item.id])
+      .sort((a, b) => summaries[b.id].lastActive - summaries[a.id].lastActive || byName.compare(a.name, b.name)).slice(0, 4)
+    const others = matching.filter(item => !recent.some(entry => entry.id === item.id)).sort((a, b) => byName.compare(a.name, b.name))
+    return { matching, recent, others }
+  }, [activities, query, summaries, visible])
   const options = [...recent, ...others]
   const pointed = options.find(item => item.id === highlight)
   const optionId = (id: number) => listId + '-' + id
@@ -264,25 +269,28 @@ export function Activities({ activities, summaries, busy, create, edit, archive 
 }) {
   const [archived, setArchived] = useState(false)
   const [query, setQuery] = useState('')
+  const [page, setPage] = useState(0)
   const search = useRef<HTMLInputElement>(null)
-  const archiveCount = activities.filter(item => item.archived).length
-  const visible = activities.filter(item => item.archived === archived && matches(item, query)).sort((a, b) => byName.compare(a.name, b.name))
+  const archiveCount = useMemo(() => activities.filter(item => item.archived).length, [activities])
+  const visible = useMemo(() => activities.filter(item => item.archived === archived && matches(item, query))
+    .sort((a, b) => byName.compare(a.name, b.name)), [activities, archived, query])
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(visible.length / 50) - 1))
   return <div className="page activities-page">
     <div className="heading"><div><h1>Занятия</h1><p>Выберите, чему уделяете время, и настройте список занятий.</p></div><button className="button primary" onClick={create} disabled={busy}><Plus size={17} />Новое занятие</button></div>
     <section className="panel activity-directory" aria-label="Список занятий">
       <div className="activity-directory-header">
         <div className="activity-toolbar">
           <div className="activity-tabs" role="group" aria-label="Состояние занятий">
-            <button type="button" aria-pressed={!archived} onClick={() => setArchived(false)}>Активные <small>{activities.length - archiveCount}</small></button>
-            <button type="button" aria-pressed={archived} onClick={() => setArchived(true)}>Архив <small>{archiveCount}</small></button>
+            <button type="button" aria-pressed={!archived} onClick={() => { setArchived(false); setPage(0) }}>Активные <small>{activities.length - archiveCount}</small></button>
+            <button type="button" aria-pressed={archived} onClick={() => { setArchived(true); setPage(0) }}>Архив <small>{archiveCount}</small></button>
           </div>
-          <label className="activity-search"><Search size={16} /><input ref={search} aria-label="Поиск по названию" placeholder="Поиск по названию…" value={query} onChange={event => setQuery(event.target.value)} />{query && <button type="button" title="Очистить поиск" aria-label="Очистить поиск" onClick={() => { setQuery(''); search.current?.focus() }}><X size={15} /></button>}</label>
+          <label className="activity-search"><Search size={16} /><input ref={search} aria-label="Поиск по названию" placeholder="Поиск по названию…" value={query} onChange={event => { setQuery(event.target.value); setPage(0) }} />{query && <button type="button" title="Очистить поиск" aria-label="Очистить поиск" onClick={() => { setQuery(''); setPage(0); search.current?.focus() }}><X size={15} /></button>}</label>
         </div>
         {visible.length > 0 && <div className="activity-grid activity-columns" aria-hidden="true"><span>ЗАНЯТИЕ</span><span>ВСЁ ВРЕМЯ</span><span>ПОСЛЕДНЯЯ АКТИВНОСТЬ</span><span /></div>}
       </div>
       {visible.length > 0 ?
         <ul className="activity-rows">
-          {visible.map(item => {
+          {visible.slice(currentPage * 50, (currentPage + 1) * 50).map(item => {
             const summary = summaries[item.id]
             const last = summary ? dateTime.format(new Date(summary.lastActive * 1000)) : 'Ещё не было'
             const ArchiveIcon = item.archived ? RotateCcw : Archive
@@ -300,6 +308,7 @@ export function Activities({ activities, summaries, busy, create, edit, archive 
           })}
         </ul>
       : <div className="empty"><Layers size={26} /><h3>{query.trim() ? 'Ничего не найдено' : archived ? 'Архив пуст' : 'Нет активных занятий'}</h3><p>{query.trim() ? 'Попробуйте поискать по другому названию.' : archived ? 'Сюда попадут занятия, которые вы отправите в архив.' : 'Создайте занятие или восстановите его из архива.'}</p></div>}
+      <HistoryNavigation page={currentPage} more={(currentPage + 1) * 50 < visible.length} change={setPage} nextLabel="Ещё занятия" />
       {archived && visible.length > 0 && <div className="activity-archive-note"><Archive size={15} />Время и история архивных занятий остаются в статистике.</div>}
     </section>
   </div>

@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
-import type { Action, GameIconStatus, Snapshot } from './types'
+import type { Action, GameIconStatus, GameReport, HistoryPage, Session, Snapshot } from './types'
 
 export type SnapshotOptions = { report: boolean; games: boolean; achievements: boolean }
 export type UpdateStatus = {
@@ -16,6 +16,8 @@ export type UpdateStatus = {
 
 export const desktop = {
   snapshot: (options: SnapshotOptions) => invoke<Snapshot>('snapshot', options),
+  focusPage: (activity: number | null, offset: number, limit: number) => invoke<HistoryPage<Session>>('focus_page', { activity, offset, limit }),
+  gameReport: (filtered: string | null, ranges: [number, number][], offset: number, limit: number) => invoke<GameReport>('game_report', { filtered, ranges, offset, limit }),
   apply: (action: Action) => invoke<void>('apply', { action }),
   gameIcon: (game: string, status: GameIconStatus) => invoke<ArrayBuffer>('game_icon', { game, ...status }),
   setGameIcon: (game: string, file: string | null) => invoke<void>('set_game_icon', { game, file }),

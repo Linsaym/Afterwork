@@ -1,4 +1,4 @@
-use chrono::{DateTime, Days, Local, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -121,7 +121,7 @@ pub enum ActivityColor {
     Slate,
 }
 
-#[derive(Default, Serialize)]
+#[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySummary {
     pub seconds: i64,
@@ -173,6 +173,14 @@ pub struct Session {
 }
 
 impl Session {
+    pub fn completion_time(&self) -> Timestamp {
+        self.finished.unwrap_or_else(|| {
+            self.spans
+                .iter()
+                .fold(self.started, |last, span| last.max(span[1]))
+        })
+    }
+
     pub fn intervals(&self, time: Timestamp) -> impl Iterator<Item = [Timestamp; 2]> + '_ {
         self.spans
             .iter()
@@ -256,6 +264,23 @@ impl Default for Data {
 }
 
 impl Data {
+    pub fn metadata(&self) -> Self {
+        Self {
+            settings: self.settings.clone(),
+            auto_update: self.auto_update,
+            activities: self.activities.clone(),
+            games: self.games.clone(),
+            game_sessions: Vec::new(),
+            game_monitoring: Vec::new(),
+            achievement_goals: self.achievement_goals.clone(),
+            awards: self.awards.clone(),
+            active: self.active.clone(),
+            history: Vec::new(),
+            reminder: self.reminder,
+            next_id: self.next_id,
+        }
+    }
+
     pub fn id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -308,20 +333,16 @@ impl Data {
         Ok(details)
     }
 
-    pub fn activity_summaries(&self, time: Timestamp) -> BTreeMap<u64, ActivitySummary> {
-        let mut summaries: BTreeMap<u64, ActivitySummary> = BTreeMap::new();
-        for session in self.sessions() {
-            let summary = summaries.entry(session.activity).or_default();
-            summary.last_active = summary.last_active.max(session.started);
-            for [start, end] in session.intervals(time) {
-                summary.seconds += end - start;
-                summary.last_active = summary.last_active.max(end);
-            }
-        }
-        summaries
+    #[cfg(test)]
+    pub fn status(&self, time: Timestamp) -> Day {
+        self.day_status(time, self.sessions())
     }
 
-    pub fn status(&self, time: Timestamp) -> Day {
+    pub fn day_status<'a>(
+        &self,
+        time: Timestamp,
+        sessions: impl Iterator<Item = &'a Session>,
+    ) -> Day {
         let day = self.settings.day(time);
         let start = boundary(day, self.settings.first);
         let phase = if time >= boundary(day, self.settings.second) {
@@ -329,8 +350,7 @@ impl Data {
         } else {
             1
         };
-        let seconds = self
-            .sessions()
+        let seconds = sessions
             .filter(|session| {
                 session.running.is_some()
                     || session.spans.last().is_some_and(|span| span[1] > start)
@@ -348,26 +368,16 @@ impl Data {
     }
 
     pub fn statistics(&self, time: Timestamp) -> Statistics {
-        let mut days = BTreeMap::new();
-        let mut activities = BTreeMap::new();
+        let mut totals = Statistics::default();
         for session in self.sessions() {
-            for [start, end] in session.intervals(time) {
-                if end <= start {
-                    continue;
-                }
-                *activities.entry(session.activity).or_insert(0) += end - start;
-                let mut cursor = start;
-                let mut day = self.settings.day(start);
-                while cursor < end {
-                    let next = day.checked_add_days(Days::new(1)).unwrap();
-                    let stop = end.min(boundary(next, self.settings.first));
-                    *days.entry(day).or_insert(0) += stop - cursor;
-                    cursor = stop;
-                    day = next;
-                }
-            }
+            totals.add(&self.settings, session, time, 1);
         }
-        Statistics { days, activities }
+        totals
+    }
+
+    #[cfg(test)]
+    pub fn activity_summaries(&self, now: Timestamp) -> BTreeMap<u64, ActivitySummary> {
+        crate::work_history::WorkHistory::new(self).summaries(self, now)
     }
 }
 
@@ -390,10 +400,46 @@ impl Day {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Default, Serialize)]
 pub struct Statistics {
     pub days: BTreeMap<NaiveDate, i64>,
     pub activities: BTreeMap<u64, i64>,
+}
+
+impl Statistics {
+    pub fn add(&mut self, settings: &Settings, session: &Session, now: Timestamp, direction: i64) {
+        for [start, end] in session.intervals(now).filter(|[start, end]| end > start) {
+            adjust(
+                &mut self.activities,
+                session.activity,
+                direction * (end - start),
+            );
+            let mut cursor = start;
+            let mut day = settings.day(start);
+            while cursor < end {
+                let next = day.succ_opt().unwrap();
+                let stop = end.min(boundary(next, settings.first));
+                adjust(&mut self.days, day, direction * (stop - cursor));
+                cursor = stop;
+                day = next;
+            }
+        }
+    }
+}
+
+fn adjust<K: Ord>(map: &mut BTreeMap<K, i64>, key: K, delta: i64) {
+    use std::collections::btree_map::Entry;
+    match map.entry(key) {
+        Entry::Vacant(entry) => {
+            entry.insert(delta);
+        }
+        Entry::Occupied(mut entry) => {
+            *entry.get_mut() += delta;
+            if *entry.get() == 0 {
+                entry.remove();
+            }
+        }
+    }
 }
 
 #[cfg(test)]

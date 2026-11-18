@@ -7,7 +7,7 @@ use crate::{
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use tauri::{AppHandle, Manager};
@@ -19,6 +19,9 @@ pub struct GameTracking {
     last_poll: Option<Timestamp>,
     last_observed: Option<Timestamp>,
     checkpoint_at: Timestamp,
+    pub revision: u64,
+    registered: Arc<HashSet<String>>,
+    paths: HashMap<String, String>,
 }
 
 fn enroll(games: &mut Vec<Game>, entry: DetectedGame, path: String) -> bool {
@@ -55,17 +58,29 @@ fn enroll(games: &mut Vec<Game>, entry: DetectedGame, path: String) -> bool {
 }
 
 impl Engine {
-    pub fn registered_games(&self) -> HashSet<String> {
-        self.data
+    pub fn refresh_game_paths(&mut self) {
+        self.game_tracking.registered = Arc::new(
+            self.data
+                .games
+                .iter()
+                .flat_map(Game::paths)
+                .map(registered_path)
+                .collect(),
+        );
+        self.game_tracking.paths = self
+            .data
             .games
             .iter()
-            .flat_map(Game::paths)
-            .map(registered_path)
-            .collect()
+            .filter(|game| !game.excluded)
+            .flat_map(|game| {
+                game.paths()
+                    .map(move |path| (registered_path(path), game.path.clone()))
+            })
+            .collect();
     }
 
     pub fn observe_games(&mut self, sample: Sample, now: Timestamp) {
-        let mut games = self.data.games.clone();
+        let mut games = None;
         let mut changed = false;
         for entry in sample.discovered {
             let path = match self.game_path(&entry.path) {
@@ -79,7 +94,11 @@ impl Engine {
             };
             let Some(path) = path.to_str() else { continue };
             let source = entry.source;
-            if enroll(&mut games, entry, path.to_owned()) {
+            if enroll(
+                games.get_or_insert_with(|| self.data.games.clone()),
+                entry,
+                path.to_owned(),
+            ) {
                 changed = true;
                 if crate::game_diagnostics() {
                     eprintln!("[Afterwork] {path}: распознано, источник — {source}");
@@ -89,24 +108,18 @@ impl Engine {
         if changed
             && self
                 .update(|data| {
-                    data.games = games;
+                    data.games = games.unwrap();
                     Ok(())
                 })
                 .is_ok()
         {
+            self.achievement_history = None;
+            self.achievements_dirty = true;
+            self.refresh_game_paths();
             self.sync_locks(now, true);
         }
 
-        let paths: HashMap<_, _> = self
-            .data
-            .games
-            .iter()
-            .filter(|game| !game.excluded)
-            .flat_map(|game| {
-                game.paths()
-                    .map(move |path| (registered_path(path), game.path.clone()))
-            })
-            .collect();
+        let paths = &self.game_tracking.paths;
         let mut running = HashMap::<String, (Timestamp, bool)>::new();
         for (path, created, discovered) in sample.running {
             if let Some(game) = paths.get(&registered_path(&path.to_string_lossy())) {
@@ -134,12 +147,19 @@ impl Engine {
             } else {
                 self.data.game_monitoring.push([now, now]);
             }
+            let position = self.data.game_monitoring.len() - 1;
+            self.monitoring_dirty = Some(
+                self.monitoring_dirty
+                    .map_or(position, |dirty| dirty.min(position)),
+            );
         }
+        let observation_changed = sample.observed != tracker.last_observed.is_some();
         tracker.last_observed = sample.observed.then_some(now);
         let continuous = tracker
             .last_poll
             .filter(|last| now >= *last && now - *last <= 12);
         let mut transitioned = false;
+        let observed_changed = !tracker.live.is_empty();
         tracker.live.retain(|game, session| {
             if continuous.is_some()
                 && running.get(game).is_some_and(|(created, _)| {
@@ -153,6 +173,12 @@ impl Engine {
                 session.end = (*end).clamp(session.end, now.max(session.end));
             }
             tracker.finished.push(session.clone());
+            if session.end > session.start || session.launched.is_some() {
+                self.game_history.push(session.clone());
+                if let Some(history) = &mut self.achievement_history {
+                    history.append_game(&self.data, session, now);
+                }
+            }
             transitioned = true;
             false
         });
@@ -185,10 +211,14 @@ impl Engine {
             }
         }
         tracker.last_poll = Some(now);
+        if observed_changed || transitioned {
+            tracker.revision += 1;
+        }
+        self.achievements_dirty |= transitioned || observation_changed;
         if transitioned
-            || !tracker.finished.is_empty()
             || (sample.observed || !tracker.live.is_empty())
                 && (now >= tracker.checkpoint_at || now < tracker.checkpoint_at - 60)
+            || !tracker.finished.is_empty() && now >= tracker.checkpoint_at
         {
             let _ = self.checkpoint_games(now);
         }
@@ -208,6 +238,13 @@ impl Engine {
                 return true;
             }
             tracker.finished.push(session.clone());
+            if session.end > session.start || session.launched.is_some() {
+                self.game_history.push(session.clone());
+                if let Some(history) = &mut self.achievement_history {
+                    history.append_game(&self.data, session, now);
+                }
+            }
+            tracker.revision += 1;
             false
         });
         if !tracker.finished.is_empty() {
@@ -217,57 +254,32 @@ impl Engine {
 
     pub fn checkpoint_games(&mut self, now: Timestamp) -> crate::CommandResult<()> {
         let tracker = &self.game_tracking;
-        if tracker.live.is_empty()
-            && tracker.finished.is_empty()
-            && self.data.game_monitoring.is_empty()
+        if tracker.live.is_empty() && tracker.finished.is_empty() && self.monitoring_dirty.is_none()
         {
             return Ok(());
         }
-        let sessions = tracker
+        let sessions: Vec<_> = tracker
             .finished
             .iter()
             .chain(tracker.live.values())
+            .filter(|session| session.end > session.start || session.launched.is_some())
             .cloned()
-            .collect::<Vec<_>>();
-        self.update(|data| {
-            merge_sessions(&mut data.game_sessions, sessions);
-            Ok(())
-        })?;
-        self.game_tracking.finished.clear();
+            .collect();
+        let metadata = self.data.metadata();
+        let result = self.persist(&metadata, None, &sessions);
+        if result.is_ok() {
+            self.achievements_dirty = true;
+            self.game_tracking.finished.clear();
+        }
         self.game_tracking.checkpoint_at = now
-            + if self.game_tracking.live.is_empty() {
+            + if result.is_err() {
+                10
+            } else if self.game_tracking.live.is_empty() {
                 60
             } else {
                 20
             };
-        Ok(())
-    }
-
-    pub fn game_report(&self) -> Vec<GameSession> {
-        let mut history = self.data.game_sessions.clone();
-        merge_sessions(
-            &mut history,
-            self.game_tracking
-                .finished
-                .iter()
-                .chain(self.game_tracking.live.values())
-                .cloned(),
-        );
-        history
-    }
-}
-
-fn merge_sessions(history: &mut Vec<GameSession>, sessions: impl IntoIterator<Item = GameSession>) {
-    for session in sessions {
-        if let Some(saved) = history
-            .iter_mut()
-            .rev()
-            .find(|saved| saved.id == session.id)
-        {
-            *saved = session;
-        } else if session.end > session.start || session.launched.is_some() {
-            history.push(session);
-        }
+        result
     }
 }
 
@@ -276,7 +288,7 @@ pub fn track(app: AppHandle) {
     loop {
         let state = app.state::<Mutex<Engine>>();
         let registered = match state.lock() {
-            Ok(engine) => engine.registered_games(),
+            Ok(engine) => Arc::clone(&engine.game_tracking.registered),
             Err(_) => return,
         };
         let sample = detector.sample(model::now(), &registered);
@@ -347,11 +359,9 @@ mod tests {
             },
             now + 3,
         );
-        assert_eq!(engine.data.game_sessions.len(), 1);
-        assert_eq!(
-            engine.data.game_sessions[0].end - engine.data.game_sessions[0].start,
-            2
-        );
+        assert_eq!(engine.game_history.iter().count(), 1);
+        let session = engine.game_history.iter().next().unwrap();
+        assert_eq!(session.end - session.start, 2);
         engine
             .update(|data| {
                 data.games[0].excluded = true;
@@ -364,6 +374,6 @@ mod tests {
         assert!(running.wait().unwrap().success());
         let reopened = Engine::load(directory.path().join("data")).unwrap();
         assert!(reopened.data.games[0].excluded);
-        assert_eq!(reopened.game_report().len(), 1);
+        assert_eq!(reopened.game_history.iter().count(), 1);
     }
 }

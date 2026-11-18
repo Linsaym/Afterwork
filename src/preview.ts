@@ -1,5 +1,5 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
-import { dateKey, recordedSeconds, type Action, type Session, type Snapshot } from './types'
+import { dateKey, recordedSeconds, type Action, type GameReport, type GameSession, type HistoryPage, type Session, type Snapshot } from './types'
 import type { UpdateStatus } from './desktop'
 import updateFixture from '../fixtures/ipc-update-status.json'
 import { version } from '../package.json'
@@ -53,7 +53,7 @@ export function installPreview() {
       { id: 2, name: 'Чтение', icon: 'book', color: 'green', archived: false },
     ],
     activitySummaries: {}, games: [], active: null, elapsed: 0,
-    failures: {}, blockedCount: 0, report: null, runningGames: [], gameHistory: null,
+    failures: {}, blockedCount: 0, report: null, runningGames: [], gameRevision: null, gameEarliest: null, workRevision: 0,
     gameIcons: null, awards: {}, achievementProgress: null,
   }
   if (scenario === 'demo' || scenario === 'archive') {
@@ -67,7 +67,7 @@ export function installPreview() {
     data.active = { id: 5, activity: 1, started, running: started, spans: [], note: '' }
   }
   if (scenario === 'error') data.failures[gamePath] = 'Файл занят другой программой. Afterwork повторит попытку.'
-  const gameHistory: NonNullable<Snapshot['gameHistory']> = []
+  const gameHistory: GameSession[] = []
   if (scenario === 'game-stats') {
     const firstGame = 'C:/Demo/StardewValley.exe'
     const secondGame = 'C:/Demo/Hades.exe'
@@ -225,12 +225,56 @@ export function installPreview() {
           report: payload?.report ? { totals: {
             days: seconds ? { [data.date]: seconds } : {},
             activities: Object.fromEntries(Object.entries(summaries).map(([id, item]) => [id, item.seconds])),
-          }, history } : null,
+          }, goals: history.reduce<Record<number, number>>((goals, session) => {
+            if (session.completedGoals?.length) goals[session.activity] = (goals[session.activity] ?? 0) + session.completedGoals.length
+            return goals
+          }, {}) } : null,
           achievementProgress: payload?.achievements ? achievementProgress : null,
-          gameHistory: payload?.games || payload?.report ? gameHistory : null,
+          gameRevision: payload?.games || payload?.report ? 0 : null,
+          gameEarliest: payload?.games && gameHistory.length ? Math.min(...gameHistory.map(item => item.start)) : null,
         } satisfies Snapshot)
       }
-      case 'apply': return apply(payload?.action as Action)
+      case 'focus_page': {
+        const activity = payload?.activity as number | null
+        const offset = Number(payload?.offset)
+        const limit = Number(payload?.limit)
+        const time = (session: Session) => session.finished ?? session.spans.reduce((last, [, end]) => Math.max(last, end), session.started)
+        const rows = activity === null ? [...history].reverse() : history
+          .filter(session => session.activity === activity && session.completedGoals?.length)
+          .sort((a, b) => time(b) - time(a) || b.id - a.id)
+        return structuredClone({ sessions: rows.slice(offset, offset + limit), more: rows.length > offset + limit } satisfies HistoryPage<Session>)
+      }
+      case 'game_report': {
+        const filtered = payload?.filtered as string | null
+        const ranges = payload?.ranges as [number, number][]
+        const offset = Number(payload?.offset)
+        const limit = Number(payload?.limit)
+        const totals: GameReport['totals'] = {}
+        for (const session of gameHistory) {
+          const entry = totals[session.game] ??= { count: 0, seconds: 0, latest: 0, buckets: [0, 0, 0, 0] }
+          entry.count++
+          entry.seconds += session.end - session.start
+          entry.latest = Math.max(entry.latest, session.end)
+          for (let cursor = session.start; cursor < session.end;) {
+            const date = new Date(cursor * 1000)
+            const bucket = Math.floor(date.getHours() / 6)
+            const end = Math.min(session.end, date.setHours((bucket + 1) * 6, 0, 0, 0) / 1000)
+            if (end <= cursor) break
+            entry.buckets[bucket] += end - cursor
+            cursor = end
+          }
+        }
+        const overlap = (session: GameSession, start: number, end: number) => Math.max(0, Math.min(session.end, end) - Math.max(session.start, start))
+        const rows = ranges.length ? gameHistory.filter(session => (!filtered || session.game === filtered)
+          && overlap(session, ranges[0][0], ranges.at(-1)![1]) > 0).sort((a, b) => b.end - a.end) : []
+        return structuredClone({ totals, buckets: ranges.map(([start, end]) => rows.reduce((sum, row) => sum + overlap(row, start, end), 0)),
+          sessions: rows.slice(offset, offset + limit), more: rows.length > offset + limit } satisfies GameReport)
+      }
+      case 'apply': {
+        apply(payload?.action as Action)
+        data.workRevision++
+        return
+      }
       case 'update_status': return structuredClone(updates)
       case 'set_auto_update':
         updates.autoUpdate = !!payload?.enabled
