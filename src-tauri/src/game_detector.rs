@@ -118,7 +118,7 @@ fn minecraft_window_title(title: &str) -> bool {
 }
 
 fn minecraft_window_class(class: &[u16]) -> bool {
-    ["GLFW30", "LWJGL"]
+    ["GLFW30", "LWJGL", "SDL_app"]
         .iter()
         .any(|name| class.iter().copied().eq(name.encode_utf16()))
 }
@@ -283,7 +283,7 @@ mod tests {
         assert!(!java_runtime(Path::new("TLauncher.exe")));
         assert!(!java_runtime(Path::new("javaws.exe")));
 
-        for class in ["GLFW30", "LWJGL"] {
+        for class in ["GLFW30", "LWJGL", "SDL_app"] {
             assert!(minecraft_window_class(
                 &class.encode_utf16().collect::<Vec<_>>()
             ));
@@ -297,6 +297,7 @@ mod tests {
             "Minecraft",
             "Minecraft 1.20.1",
             "Minecraft* 1.21.1 - Multiplayer",
+            "Minecraft NeoForge* 26.3 - Одиночная игра",
         ] {
             assert!(minecraft_window_title(title));
         }
