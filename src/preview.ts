@@ -1,5 +1,5 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
-import { dateKey, recordedSeconds, type Action, type GameReport, type GameSession, type HistoryPage, type Session, type Snapshot } from './types'
+import { canBlockGame, dateKey, minecraftJava, recordedSeconds, type Action, type GameReport, type GameSession, type HistoryPage, type Session, type Snapshot } from './types'
 import type { UpdateStatus } from './desktop'
 import updateFixture from '../fixtures/ipc-update-status.json'
 import { version } from '../package.json'
@@ -62,6 +62,9 @@ export function installPreview() {
   }
   if (scenario === 'demo' || scenario === 'locked' || scenario === 'error') {
     data.games.push({ path: gamePath, name: 'Тестовая игра', source: 'Steam', catalog_id: 'steam:1', aliases: [], excluded: false })
+  }
+  if (scenario === 'locked') {
+    data.games.push({ path: minecraftJava, name: 'Minecraft: Java Edition', source: 'Распознано по окну', catalog_id: minecraftJava, aliases: [], excluded: false })
   }
   if (scenario === 'demo' || scenario === 'active' || scenario === 'update') {
     data.active = { id: 5, activity: 1, started, running: started, spans: [], note: '' }
@@ -221,7 +224,7 @@ export function installPreview() {
         return structuredClone({
           ...data, seconds, target, locked, activitySummaries: summaries,
           elapsed: data.active ? elapsed(data.active) : 0,
-          blockedCount: locked && scenario !== 'error' ? data.games.filter(game => !game.excluded).length : 0,
+          blockedCount: locked && scenario !== 'error' ? data.games.filter(game => !game.excluded && canBlockGame(game)).length : 0,
           report: payload?.report ? { totals: {
             days: seconds ? { [data.date]: seconds } : {},
             activities: Object.fromEntries(Object.entries(summaries).map(([id, item]) => [id, item.seconds])),

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { desktop } from './desktop'
 import { HistoryNavigation, useHistoryQuery } from './history'
 import { BarChart3, Check, Ellipsis, EyeOff, Gamepad2, History, ImagePlus, Plus, ScanLine, Search, ShieldCheck, Trash2 } from 'lucide-react'
-import { duration, type Game, type GameIconStatus, type Snapshot } from './types'
+import { canBlockGame, duration, type Game, type GameIconStatus, type Snapshot } from './types'
 
 const periods = [{ key: 'day', label: 'День' }, { key: 'week', label: 'Неделя' }, { key: 'month', label: 'Месяц' }, { key: 'all', label: 'Всё время' }] as const
 type Period = typeof periods[number]['key']
@@ -173,6 +173,7 @@ export function Games({ data, busy, add, remove, exclude, editIcon }: { data: Sn
         const playing = data.runningGames.includes(game.path)
         const failure = [game.path, ...game.aliases].map(path => data.failures[path]).find(Boolean)
         const blocked = !game.excluded && data.locked
+        const trackingOnly = !canBlockGame(game)
         const statistics = (path: string | undefined) => {
           setSelected(path)
           setHistoryPage(0)
@@ -180,12 +181,12 @@ export function Games({ data, busy, add, remove, exclude, editIcon }: { data: Sn
           chart.current?.scrollIntoView({ block: 'start' })
         }
         return <div className="tracked-row" key={game.path}>
-          <button className="tracked-name" aria-pressed={filtered === game.path} onClick={() => statistics(filtered === game.path ? undefined : game.path)} title={'Показать статистику игры · ' + pathLabel(game.path)}>
+          <button className="tracked-name" aria-pressed={filtered === game.path} onClick={() => statistics(filtered === game.path ? undefined : game.path)} title={trackingOnly ? 'Показать статистику игры' : 'Показать статистику игры · ' + pathLabel(game.path)}>
             <GameIcon path={game.path} status={data.gameIcons?.[game.path]} /><span><b title={game.name}>{game.name}</b><small>{game.source || 'Вручную'}{playing && <em>Сейчас в игре</em>}</small></span>
           </button>
           <div className="tracked-meta"><b>{duration(summary?.seconds ?? 0)}</b><small>{playing ? 'Сессия идёт' : summary ? dateTime.format(summary.latest * 1000) : 'Сессий пока нет'}</small></div>
           <span className={'game-lock-label' + (failure ? ' error' : '')}>
-            {game.excluded ? 'Исключена' : blocked ? failure ? 'Блокировка неполная' : 'Заблокирована' : 'Доступна'}
+            {game.excluded ? 'Исключена' : trackingOnly ? 'Только учёт времени' : blocked ? failure ? 'Блокировка неполная' : 'Заблокирована' : 'Доступна'}
             {failure && <small>{failure}</small>}
           </span>
           <GameActions game={game} busy={busy} statistics={() => statistics(game.path)} editIcon={editIcon} exclude={exclude} remove={remove} />

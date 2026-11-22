@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub type Timestamp = i64;
+pub const MINECRAFT_JAVA: &str = "minecraft:java";
 
 pub fn now() -> Timestamp {
     Utc::now().timestamp()
@@ -145,6 +146,10 @@ pub struct Game {
 }
 
 impl Game {
+    pub fn can_block(&self) -> bool {
+        self.catalog_id != MINECRAFT_JAVA
+    }
+
     pub fn paths(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.path.as_str()).chain(self.aliases.iter().map(String::as_str))
     }

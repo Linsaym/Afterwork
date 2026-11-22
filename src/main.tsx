@@ -19,7 +19,7 @@ import { Achievements, AchievementUnlock } from './achievements'
 import { GameIcon, Games } from './games'
 import { Statistics } from './statistics'
 import { UpdateSettings, useUpdates } from './updates'
-import { clock, dateOf, stopwatch, type Action, type Activity, type ActivityDetails, type Game, type Settings, type Snapshot } from './types'
+import { canBlockGame, clock, dateOf, stopwatch, type Action, type Activity, type ActivityDetails, type Game, type Settings, type Snapshot } from './types'
 
 const pages = [
   { id: 'home', label: 'Главная', icon: LayoutGrid },
@@ -283,7 +283,8 @@ function Home({ data, busy, selection, select, run, add, finish, games }: {
   const { settings } = data
   const hasFailures = Object.keys(data.failures).length > 0
   const tracked = data.games.some(game => !game.excluded)
-  const status = !tracked ? 'Нет игр под контролем' : data.locked ? (hasFailures ? 'Блокировка с ограничениями' : 'Игры заблокированы') : 'Игры разблокированы'
+  const blockable = data.games.some(game => !game.excluded && canBlockGame(game))
+  const status = !tracked ? 'Нет игр под контролем' : !blockable ? 'Учёт игрового времени' : data.locked ? (hasFailures ? 'Блокировка с ограничениями' : 'Игры заблокированы') : 'Игры разблокированы'
   return <div className="page home">
     <Heading title="Время для важного" subtitle="Запускайте фокус-сессии и следите за дневной целью." action={<span className="date-chip"><Clock3 size={15} /><span>{todayFormat.format(dateOf(data.date))}</span></span>} />
     <div className="hero-grid">
@@ -326,9 +327,9 @@ function Home({ data, busy, selection, select, run, add, finish, games }: {
       <summary><Flag size={17} /><strong>Цели занятия</strong><span>{goals.length}</span><ChevronDown size={16} className="session-goals-chevron" /></summary>
       <ul aria-label="Цели занятия" tabIndex={0}>{goals.map(goal => <li key={goal}>{goal}</li>)}</ul>
     </details>}
-    <section className={'panel unlock ' + (!data.locked && tracked ? 'unlocked' : '')}>
-      <span className="unlock-icon">{tracked && data.locked ? <LockKeyhole size={22} /> : tracked ? <ShieldCheck size={22} /> : <Gamepad2 size={22} />}</span>
-      <div><h2>{status}</h2><p>{!tracked ? 'Afterwork добавляет распознанные игры в список автоматически.' : hasFailures ? 'Проверьте состояние отдельных файлов в разделе «Игры».' : data.locked ? 'До разблокировки осталось ' + Math.ceil(left / 60) + ' мин работы.' : unlockedDay ? 'Дневная цель выполнена. Игры доступны до ' + clock(settings.first) + '.' : 'Игры доступны до ' + clock(settings.second) + '. Второй этап можно выполнить заранее.'}</p></div>
+    <section className={'panel unlock ' + (!data.locked && blockable ? 'unlocked' : '')}>
+      <span className="unlock-icon">{blockable && data.locked ? <LockKeyhole size={22} /> : blockable ? <ShieldCheck size={22} /> : <Gamepad2 size={22} />}</span>
+      <div><h2>{status}</h2><p>{!tracked ? 'Afterwork добавляет распознанные игры в список автоматически.' : !blockable ? 'Игровые сессии сохраняются в разделе «Игры».' : hasFailures ? 'Проверьте состояние отдельных файлов в разделе «Игры».' : data.locked ? 'До разблокировки осталось ' + Math.ceil(left / 60) + ' мин работы.' : unlockedDay ? 'Дневная цель выполнена. Игры доступны до ' + clock(settings.first) + '.' : 'Игры доступны до ' + clock(settings.second) + '. Второй этап можно выполнить заранее.'}</p></div>
       <button className="button secondary unlock-button" onClick={games}>Мои игры <ArrowUpRight size={16} /></button>
     </section>
   </div>

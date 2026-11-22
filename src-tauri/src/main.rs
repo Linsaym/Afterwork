@@ -304,7 +304,7 @@ impl Engine {
             .data
             .games
             .iter()
-            .filter(|game| !game.excluded)
+            .filter(|game| !game.excluded && game.can_block())
             .flat_map(Game::paths)
             .collect::<std::collections::HashSet<_>>();
         self.locks.retain(|path, _| targets.contains(path.as_str()));
@@ -477,7 +477,9 @@ fn make_snapshot(
             .games
             .iter()
             .filter(|game| {
-                !game.excluded && game.paths().all(|path| engine.locks.contains_key(path))
+                !game.excluded
+                    && game.can_block()
+                    && game.paths().all(|path| engine.locks.contains_key(path))
             })
             .count(),
         running_games: engine.game_tracking.live.keys().cloned().collect(),

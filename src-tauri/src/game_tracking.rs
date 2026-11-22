@@ -1,7 +1,7 @@
 use crate::{
     game_catalog::DetectedGame,
     game_detector::{registered_path, Detector, Sample},
-    model::{self, Game, GameSession, Timestamp},
+    model::{self, Game, GameSession, Timestamp, MINECRAFT_JAVA},
     Engine,
 };
 use std::{
@@ -84,7 +84,13 @@ impl Engine {
         let mut games = None;
         let mut changed = false;
         for entry in sample.discovered {
-            let path = match self.game_path(&entry.path) {
+            // Minecraft sessions use a catalog key so that changing Java runtimes keeps one history.
+            let path = if entry.id == MINECRAFT_JAVA {
+                Ok(MINECRAFT_JAVA.into())
+            } else {
+                self.game_path(&entry.path)
+            };
+            let path = match path {
                 Ok(path) => path,
                 Err(error) => {
                     if crate::game_diagnostics() {
@@ -313,6 +319,50 @@ mod tests {
         fs,
         process::{Command, Stdio},
     };
+
+    #[test]
+    fn minecraft_records_history_without_locking_java() {
+        let directory = tempfile::tempdir().unwrap();
+        let data = directory.path().join("data");
+        let mut engine = Engine::load(data.clone()).unwrap();
+        let path = Path::new(MINECRAFT_JAVA).to_owned();
+        let now = 1_760_000_000;
+        engine.observe_games(
+            Sample {
+                discovered: vec![DetectedGame {
+                    id: MINECRAFT_JAVA.into(),
+                    name: "Minecraft: Java Edition".into(),
+                    source: "Распознано по окну",
+                    path: path.clone(),
+                }],
+                running: vec![(path.clone(), now, true)],
+                exited: Vec::new(),
+                observed: true,
+            },
+            now,
+        );
+        assert_eq!(engine.data.games.len(), 1);
+        assert!(engine.game_tracking.live.contains_key(MINECRAFT_JAVA));
+        engine.sync_locks_for_day(now, true, true);
+        assert!(engine.locks.is_empty());
+        assert!(engine.failures.is_empty());
+
+        engine.observe_games(
+            Sample {
+                discovered: Vec::new(),
+                running: Vec::new(),
+                exited: vec![(path, now + 2)],
+                observed: true,
+            },
+            now + 3,
+        );
+        drop(engine);
+        let reopened = Engine::load(data).unwrap();
+        assert_eq!(reopened.data.games[0].path, MINECRAFT_JAVA);
+        let session = reopened.game_history.iter().next().unwrap();
+        assert_eq!(session.game, MINECRAFT_JAVA);
+        assert_eq!(session.end - session.start, 2);
+    }
 
     #[test]
     fn enrollment_blocks_new_launches_and_exclusion_keeps_history() {

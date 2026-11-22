@@ -1,6 +1,6 @@
 use crate::{
     game_catalog::{path_key, Catalog, DetectedGame},
-    model::Timestamp,
+    model::{Timestamp, MINECRAFT_JAVA},
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -15,8 +15,8 @@ use windows_sys::Win32::{
         PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
     },
     UI::WindowsAndMessaging::{
-        EnumWindows, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic,
-        IsWindowVisible,
+        EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW,
+        GetWindowThreadProcessId, IsIconic, IsWindowVisible,
     },
 };
 
@@ -32,7 +32,7 @@ struct Process {
     created: Timestamp,
     path: PathBuf,
     key: String,
-    known: bool,
+    tracked_as: Option<PathBuf>,
     last_rejection: Option<&'static str>,
     rejected_as_foreground: Option<bool>,
 }
@@ -80,7 +80,7 @@ impl Process {
             created: 0,
             path: PathBuf::new(),
             key: String::new(),
-            known: false,
+            tracked_as: None,
             last_rejection: None,
             rejected_as_foreground: None,
         };
@@ -106,7 +106,27 @@ impl Process {
 struct Windows {
     foreground: u32,
     visible: HashSet<u32>,
+    minecraft: HashSet<u32>,
     observed: bool,
+}
+
+fn minecraft_window_title(title: &str) -> bool {
+    title.strip_prefix("Minecraft").is_some_and(|suffix| {
+        let suffix = suffix.strip_prefix('*').unwrap_or(suffix);
+        suffix.is_empty() || suffix.starts_with(' ')
+    })
+}
+
+fn minecraft_window_class(class: &[u16]) -> bool {
+    ["GLFW30", "LWJGL"]
+        .iter()
+        .any(|name| class.iter().copied().eq(name.encode_utf16()))
+}
+
+fn java_runtime(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| {
+        name.eq_ignore_ascii_case("java.exe") || name.eq_ignore_ascii_case("javaw.exe")
+    })
 }
 
 unsafe extern "system" fn window_proc(window: HWND, context: LPARAM) -> i32 {
@@ -114,16 +134,30 @@ unsafe extern "system" fn window_proc(window: HWND, context: LPARAM) -> i32 {
         return 1;
     }
     let mut rect = RECT::default();
-    if GetWindowRect(window, &mut rect) == 0
-        || rect.right - rect.left < 560
-        || rect.bottom - rect.top < 320
-    {
+    let large = GetWindowRect(window, &mut rect) != 0
+        && rect.right - rect.left >= 560
+        && rect.bottom - rect.top >= 320;
+    let mut class = [0u16; 32];
+    let mut title = [0u16; 64];
+    let class_len = GetClassNameW(window, class.as_mut_ptr(), class.len() as i32);
+    // Compare the class before reading the window caption.
+    let minecraft = minecraft_window_class(&class[..class_len as usize]) && {
+        let title_len = GetWindowTextW(window, title.as_mut_ptr(), title.len() as i32);
+        minecraft_window_title(&String::from_utf16_lossy(&title[..title_len as usize]))
+    };
+    if !large && !minecraft {
         return 1;
     }
     let mut pid = 0;
     GetWindowThreadProcessId(window, &mut pid);
     if pid != 0 && pid != std::process::id() {
-        (*(context as *mut Windows)).visible.insert(pid);
+        let windows = &mut *(context as *mut Windows);
+        if large {
+            windows.visible.insert(pid);
+        }
+        if minecraft {
+            windows.minecraft.insert(pid);
+        }
     }
     1
 }
@@ -168,34 +202,38 @@ impl Detector {
             if unsafe { WaitForSingleObject(process.handle, 0) } == WAIT_TIMEOUT {
                 return true;
             }
-            if process.known {
+            if let Some(path) = &process.tracked_as {
                 let stop = process_times(process.handle)
                     .and_then(|(_, stop)| stop)
                     .unwrap_or(now);
-                exited.push((process.path.clone(), stop));
+                exited.push((path.clone(), stop));
             }
             false
         });
         let windows = windows();
-        for &pid in &windows.visible {
+        for &pid in windows.visible.union(&windows.minecraft) {
             if let std::collections::hash_map::Entry::Vacant(entry) = self.processes.entry(pid) {
                 if let Some(process) = Process::open(pid) {
                     entry.insert(process);
                 }
             }
         }
+        let minecraft = Path::new(MINECRAFT_JAVA);
+        let mut enroll_minecraft = !registered.contains(MINECRAFT_JAVA);
         for (&pid, process) in &mut self.processes {
-            let was_known = process.known;
-            if !process.known && windows.visible.contains(&pid) {
+            let was_known = process.tracked_as.is_some();
+            if !was_known && windows.minecraft.contains(&pid) && java_runtime(&process.path) {
+                process.tracked_as = Some(minecraft.to_owned());
+            } else if !was_known && windows.visible.contains(&pid) {
                 if registered.contains(&process.key) {
-                    process.known = true;
+                    process.tracked_as = Some(process.path.clone());
                 } else if process.rejected_as_foreground != Some(pid == windows.foreground) {
                     match self
                         .catalog
                         .identify(&process.path, pid == windows.foreground)
                     {
                         Ok(game) => {
-                            process.known = true;
+                            process.tracked_as = Some(process.path.clone());
                             discovered.push(game);
                         }
                         Err(reason) => {
@@ -208,8 +246,17 @@ impl Detector {
                     }
                 }
             }
-            if process.known {
-                running.push((process.path.clone(), process.created, !was_known));
+            if let Some(path) = &process.tracked_as {
+                if path == minecraft && enroll_minecraft {
+                    discovered.push(DetectedGame {
+                        id: MINECRAFT_JAVA.into(),
+                        name: "Minecraft: Java Edition".into(),
+                        source: "Распознано по окну",
+                        path: path.clone(),
+                    });
+                    enroll_minecraft = false;
+                }
+                running.push((path.clone(), process.created, !was_known));
             }
         }
         Sample {
@@ -223,4 +270,38 @@ impl Detector {
 
 pub fn registered_path(path: &str) -> String {
     path_key(Path::new(path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minecraft_detection_requires_java_and_the_game_window() {
+        assert!(java_runtime(Path::new(r"D:\Java\bin\JAVAW.exe")));
+        assert!(java_runtime(Path::new("java.exe")));
+        assert!(!java_runtime(Path::new("TLauncher.exe")));
+        assert!(!java_runtime(Path::new("javaws.exe")));
+
+        for class in ["GLFW30", "LWJGL"] {
+            assert!(minecraft_window_class(
+                &class.encode_utf16().collect::<Vec<_>>()
+            ));
+        }
+        for class in ["SunAwtFrame", "Chrome_WidgetWin_1", "GLFW30Helper"] {
+            assert!(!minecraft_window_class(
+                &class.encode_utf16().collect::<Vec<_>>()
+            ));
+        }
+        for title in [
+            "Minecraft",
+            "Minecraft 1.20.1",
+            "Minecraft* 1.21.1 - Multiplayer",
+        ] {
+            assert!(minecraft_window_title(title));
+        }
+        for title in ["", "TLauncher", "MinecraftLauncher", "A guide to Minecraft"] {
+            assert!(!minecraft_window_title(title));
+        }
+    }
 }
