@@ -189,20 +189,19 @@ const timeOfDay = ['Ночь · 00:00–06:00', 'Утро · 06:00–12:00', 'Д
 function summarizeGames(totals: Record<string, GameTotals>, games: Game[]) {
   const secondsByTime = timeOfDay.map(() => 0)
   const gamesByPath = new Map(games.flatMap(game => [game.path, ...game.aliases].map(path => [path, game] as const)))
-  const playCounts = new Map<string, { name: string; count: number; seconds: number }>()
-  for (const [path, { count, seconds, buckets }] of Object.entries(totals)) {
-    if (!count) continue
+  const playTimes = new Map<string, { name: string; seconds: number }>()
+  for (const [path, { seconds, buckets }] of Object.entries(totals)) {
+    if (seconds <= 0) continue
     const game = gamesByPath.get(path)
     const key = game?.path ?? path
-    const entry = playCounts.get(key) ?? { name: game?.name ?? sessionName(path), count: 0, seconds: 0 }
-    entry.count += count
+    const entry = playTimes.get(key) ?? { name: game?.name ?? sessionName(path), seconds: 0 }
     entry.seconds += seconds
-    playCounts.set(key, entry)
+    playTimes.set(key, entry)
 
     buckets.forEach((seconds, index) => { secondsByTime[index] += seconds })
   }
-  const topGames = [...playCounts].sort(([, a], [, b]) =>
-    b.count - a.count || b.seconds - a.seconds || a.name.localeCompare(b.name, 'ru'),
+  const topGames = [...playTimes].sort(([, a], [, b]) =>
+    b.seconds - a.seconds || a.name.localeCompare(b.name, 'ru'),
   ).slice(0, 5)
   return { secondsByTime, topGames }
 }
@@ -238,10 +237,10 @@ function GameStatistics({ revision, games }: { revision: number | null; games: G
             </div>)}</div>
           </div>
           <div>
-            <h3>Игры по числу сессий</h3>
+            <h3>Время по играм</h3>
             <div className="distribution">{summary.topGames.map(([key, game]) => <div key={key}>
-              <div><b>{game.name}</b><span>{game.count} · {duration(game.seconds)}</span></div>
-              <div className="progress-track" aria-hidden="true"><span style={{ width: game.count / summary.topGames[0][1].count * 100 + '%' }} /></div>
+              <div><b>{game.name}</b><span>{duration(game.seconds)}</span></div>
+              <div className="progress-track" aria-hidden="true"><span style={{ width: game.seconds / summary.topGames[0][1].seconds * 100 + '%' }} /></div>
             </div>)}</div>
           </div>
         </div>}
