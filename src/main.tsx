@@ -4,7 +4,7 @@ import { desktop } from './desktop'
 import { Dialog } from './dialog'
 import {
   Activity as Pulse, ArrowUpRight, BarChart3, Bell, Check, ChevronDown, CircleAlert, Clock3,
-  Flag, Gamepad2, ImagePlus, Layers, LayoutGrid, LockKeyhole, Minus, Pause, Play, Plus, Settings2, ShieldCheck,
+  Flag, Gamepad2, ImagePlus, Layers, LayoutGrid, LockKeyhole, Minus, Pause, Pin, Play, Plus, Settings2, ShieldCheck,
   Square, Sun, Sunset, Timer, Trash2, Trophy, X, Zap,
 } from 'lucide-react'
 import '@fontsource-variable/inter'
@@ -134,9 +134,9 @@ function App() {
     return refresh()
   }
   const showModal = (value: Modal) => { setCompletedGoals([]); setText(''); setError(''); setModal(value) }
-  const openPriorities = (trigger: HTMLButtonElement, activityId?: number) => {
+  const openPriorities = (trigger: HTMLButtonElement) => {
     prioritiesTrigger.current = trigger
-    showModal({ type: 'priorities', activityId })
+    showModal({ type: 'priorities' })
   }
   const closeModal = () => {
     if (busy) return
@@ -200,8 +200,7 @@ function App() {
         </div>}
         {!data ? <div className="loading">{error || 'Загрузка Afterwork…'}</div> : <>
           {page === 'home' && <Home data={data} busy={busy} selection={selection} select={setSelection} run={action => void perform(async () => { await apply(action) })} add={initialName => showModal({ type: 'activity', initialName, selectNew: true })} finish={() => showModal({ type: 'finish' })} games={() => setPage('games')} managePriorities={openPriorities} />}
-          {page === 'activities' && <Activities activities={data.activities} summaries={data.activitySummaries} priorities={data.priorityGoals} busy={busy}
-            prioritize={(activity, trigger) => openPriorities(trigger, activity.id)}
+          {page === 'activities' && <Activities activities={data.activities} summaries={data.activitySummaries} busy={busy}
             create={() => showModal({ type: 'activity', initialName: '' })} edit={activity => showModal({ type: 'activity', activity, initialName: '' })}
             archive={activity => void perform(async () => {
               await apply({ type: 'archiveActivity', id: activity.id, archived: !activity.archived })
@@ -316,8 +315,8 @@ function Home({ data, busy, selection, select, run, add, finish, games, managePr
   const status = !tracked ? 'Нет игр под контролем' : !blockable ? 'Учёт игрового времени' : data.locked ? (hasFailures ? 'Блокировка с ограничениями' : 'Игры заблокированы') : 'Игры разблокированы'
   return <div className="page home">
     <Heading title="Время для важного" subtitle="Запускайте фокус-сессии и следите за дневной целью." action={<span className="date-chip"><Clock3 size={15} /><span>{todayFormat.format(dateOf(data.date))}</span></span>} />
-    <PriorityGoals goals={data.priorityGoals} activities={data.activities} busy={busy} sessionActive={!!data.active} manage={managePriorities}
-      prepare={activity => { select(activity); requestAnimationFrame(() => startButton.current?.focus()) }} />
+    {settings.showPriorityGoals && <PriorityGoals goals={data.priorityGoals} activities={data.activities} busy={busy} sessionActive={!!data.active} manage={managePriorities}
+      prepare={activity => { select(activity); requestAnimationFrame(() => startButton.current?.focus()) }} />}
     <div className="hero-grid">
       <section className="panel timer-panel">
         <div className="card-heading timer-heading"><span className="card-icon"><Timer size={19} /></span><h2>Фокус-сессия</h2>
@@ -371,6 +370,7 @@ function Preferences({ initial, save, busy, reportError, updates }: { initial: S
   const [second, setSecond] = useState(clock(initial.second))
   const [minutes, setMinutes] = useState(String(initial.minutes))
   const [notifications, setNotifications] = useState(initial.notifications)
+  const [showPriorityGoals, setShowPriorityGoals] = useState(initial.showPriorityGoals)
   const [autostart, setAutostart] = useState<boolean | null>(null)
   const [changing, setChanging] = useState(false)
   useEffect(() => { desktop.autostart().then(setAutostart).catch(error => reportError(String(error))) }, [reportError])
@@ -381,10 +381,11 @@ function Preferences({ initial, save, busy, reportError, updates }: { initial: S
     finally { setChanging(false) }
   }
   const parse = (time: string) => { const [hours, mins] = time.split(':').map(Number); return hours * 60 + mins }
-  const dirty = first !== clock(initial.first) || second !== clock(initial.second) || Number(minutes) !== initial.minutes || notifications !== initial.notifications
+  const dirty = first !== clock(initial.first) || second !== clock(initial.second) || Number(minutes) !== initial.minutes
+    || notifications !== initial.notifications || showPriorityGoals !== initial.showPriorityGoals
   return <div className="page">
     <Heading title="Настройки" subtitle="Настройте расписание и поведение Afterwork." />
-    <form className="preferences" onSubmit={event => { event.preventDefault(); save({ first: parse(first), second: parse(second), minutes: Number(minutes), notifications }) }}>
+    <form className="preferences" onSubmit={event => { event.preventDefault(); save({ first: parse(first), second: parse(second), minutes: Number(minutes), notifications, showPriorityGoals }) }}>
       <section className="panel list-panel">
         <div className="card-heading"><span className="card-icon"><Clock3 size={19} /></span><div><h2>Расписание</h2><p>С началом первого этапа начинается новый день.</p></div></div>
         <div className="settings-grid">
@@ -397,6 +398,10 @@ function Preferences({ initial, save, busy, reportError, updates }: { initial: S
         <div className="card-heading"><span className="card-icon"><Bell size={19} /></span><div><h2>В фоне</h2><p>Уведомления и вход в Windows</p></div></div>
         <div className="setting-row"><div><b>Ежечасное напоминание</b><p>«Пора улучшить жизнь :3» до выполнения второго этапа.</p></div><Toggle label="Ежечасное напоминание" value={notifications} change={() => setNotifications(!notifications)} /></div>
         <div className="setting-row"><div><b>Автозапуск с Windows</b><p>Открывать Afterwork в трее при входе в систему.</p></div><Toggle label="Автозапуск с Windows" value={!!autostart} disabled={changing || autostart === null} change={() => void toggle()} /></div>
+      </section>
+      <section className="panel list-panel">
+        <div className="card-heading"><span className="card-icon"><Pin size={19} /></span><div><h2>Главная</h2></div></div>
+        <div className="setting-row"><div><b>Ближайшие цели</b><p>Показывать выбранные цели на главной.</p></div><Toggle label="Ближайшие цели" value={showPriorityGoals} disabled={busy} change={() => setShowPriorityGoals(!showPriorityGoals)} /></div>
       </section>
       <div className="form-footer"><p role="status">{dirty ? 'Есть несохранённые изменения' : 'Настройки сохранены'}</p><button className={`button ${dirty ? 'primary' : 'secondary'}`} disabled={busy || !dirty}><Check size={17} />Сохранить настройки</button></div>
     </form>

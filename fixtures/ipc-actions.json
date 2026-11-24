@@ -78,7 +78,8 @@
       "first": 360,
       "second": 960,
       "minutes": 45,
-      "notifications": false
+      "notifications": false,
+      "showPriorityGoals": false
     }
   }
 ]

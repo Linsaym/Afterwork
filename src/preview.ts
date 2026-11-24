@@ -47,7 +47,7 @@ export function installPreview() {
   const history: Session[] = []
   const data: Snapshot = {
     date: dateKey(new Date()), seconds: 0, phase: 1, target: 2700, locked: true,
-    settings: { first: 360, second: 960, minutes: 45, notifications: true },
+    settings: { first: 360, second: 960, minutes: 45, notifications: true, showPriorityGoals: true },
     activities: [
       { id: 1, name: 'Личный проект', icon: 'target', color: 'violet', archived: false },
       { id: 2, name: 'Чтение', icon: 'book', color: 'green', archived: false },

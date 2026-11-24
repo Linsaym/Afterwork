@@ -34,6 +34,12 @@ pub struct Settings {
     pub second: u32,
     pub minutes: u32,
     pub notifications: bool,
+    #[serde(default = "default_show_priority_goals")]
+    pub show_priority_goals: bool,
+}
+
+fn default_show_priority_goals() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -43,6 +49,7 @@ impl Default for Settings {
             second: 960,
             minutes: 45,
             notifications: true,
+            show_priority_goals: default_show_priority_goals(),
         }
     }
 }

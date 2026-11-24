@@ -2,9 +2,9 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Form
 import { HistoryNavigation } from './history'
 import {
   Archive, BookOpen, Brain, BriefcaseBusiness, Check, ChevronDown, CodeXml, Dumbbell, Heart,
-  Flag, Languages, Layers, Music, Palette, Pencil, Pin, Plus, RotateCcw, Search, Sparkles, Target, Trash2, X,
+  Flag, Languages, Layers, Music, Palette, Pencil, Plus, RotateCcw, Search, Sparkles, Target, Trash2, X,
 } from 'lucide-react'
-import { duration, type Activity, type ActivityDetails, type ActivityIcon, type ActivityColor, type ActivitySummaries, type GoalRename, type PriorityGoal } from './types'
+import { duration, type Activity, type ActivityDetails, type ActivityIcon, type ActivityColor, type ActivitySummaries, type GoalRename } from './types'
 
 const icons = {
   sparkles: [Sparkles, 'Искры'], briefcase: [BriefcaseBusiness, 'Портфель'], book: [BookOpen, 'Книга'],
@@ -288,10 +288,9 @@ function ActivityGoalSummary({ goals }: { goals: string[] }) {
   </details>
 }
 
-export function Activities({ activities, summaries, priorities, busy, create, edit, archive, prioritize }: {
-  activities: Activity[]; summaries: ActivitySummaries; priorities: PriorityGoal[]; busy: boolean
+export function Activities({ activities, summaries, busy, create, edit, archive }: {
+  activities: Activity[]; summaries: ActivitySummaries; busy: boolean
   create: () => void; edit: (activity: Activity) => void; archive: (activity: Activity) => void
-  prioritize: (activity: Activity, trigger: HTMLButtonElement) => void
 }) {
   const [archived, setArchived] = useState(false)
   const [query, setQuery] = useState('')
@@ -321,7 +320,6 @@ export function Activities({ activities, summaries, priorities, busy, create, ed
             const last = summary ? dateTime.format(new Date(summary.lastActive * 1000)) : 'Ещё не было'
             const ArchiveIcon = item.archived ? RotateCcw : Archive
             const archiveLabel = item.archived ? 'Восстановить' : 'В архив'
-            const hasPriorities = priorities.some(priority => priority.activity === item.id)
             return <li className="activity-grid activity-row" key={item.id}>
               <div className="activity-name" data-color={item.color}>
                 <ActivityMark activity={item} big />
@@ -330,8 +328,6 @@ export function Activities({ activities, summaries, priorities, busy, create, ed
               <span className="activity-total" aria-label={'Всего ' + duration(summary?.seconds ?? 0)}>{duration(summary?.seconds ?? 0)}</span>
               <span className="activity-last" aria-label={'Последняя активность: ' + last}>{last}</span>
               <div className="activity-row-actions">
-                {!item.archived && <button className="button secondary activity-prioritize" data-pinned={hasPriorities} disabled={busy}
-                  aria-label={'Ближайшие цели из занятия «' + item.name + '»'} onClick={event => prioritize(item, event.currentTarget)}><Pin size={15} fill={hasPriorities ? 'currentColor' : 'none'} />Ближайшие цели</button>}
                 <button className="icon-button" disabled={busy} title="Редактировать" aria-label={'Редактировать «' + item.name + '»'} onClick={() => edit(item)}><Pencil size={15} /></button>
                 <button className="button secondary archive-button" disabled={busy} title={archiveLabel} aria-label={archiveLabel + ' «' + item.name + '»'} onClick={() => archive(item)}><ArchiveIcon size={15} /><span>{archiveLabel}</span></button></div>
             </li>

@@ -8,7 +8,8 @@
     "first": 360,
     "second": 960,
     "minutes": 45,
-    "notifications": true
+    "notifications": true,
+    "showPriorityGoals": true
   },
   "activities": [
     {

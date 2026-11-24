@@ -13,7 +13,7 @@ export const canBlockGame = (game: Game) => game.catalog_id !== minecraftJava
 export type GameSession = { id: number; game: string; start: number; end: number }
 export type GameIconStatus = { revision: string; custom: boolean }
 export type Session = { id: number; activity: number; started: number; running: number | null; spans: [number, number][]; note: string; finished?: number | null; completedGoals?: string[] }
-export type Settings = { first: number; second: number; minutes: number; notifications: boolean }
+export type Settings = { first: number; second: number; minutes: number; notifications: boolean; showPriorityGoals: boolean }
 export type Report = { totals: { days: Record<string, number>; activities: Record<string, number> }; goals: Record<number, number> }
 export type HistoryPage<T> = { sessions: T[]; more: boolean }
 export type GameTotals = { count: number; seconds: number; latest: number; buckets: number[] }

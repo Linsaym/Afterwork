@@ -828,6 +828,7 @@ mod tests {
         .unwrap();
         let mut engine = Engine::load(dir.path().to_owned()).unwrap();
         assert!(engine.data.priority_goals.is_empty());
+        assert!(engine.data.settings.show_priority_goals);
         let now = model::boundary(NaiveDate::from_ymd_opt(2025, 1, 2).unwrap(), 360);
         let mut details = engine.data.activities[0].details.clone();
         details.goals_enabled = true;
@@ -873,8 +874,14 @@ mod tests {
                 .change_action(Action::SetPriorityGoals { goals: invalid }, now)
                 .is_err());
         }
+        let mut settings = engine.data.settings.clone();
+        settings.show_priority_goals = false;
+        engine
+            .change_action(Action::SaveSettings { settings }, now)
+            .unwrap();
         drop(engine);
         let mut engine = Engine::load(dir.path().to_owned()).unwrap();
+        assert!(!engine.data.settings.show_priority_goals);
         assert_eq!(engine.data.priority_goals, priorities);
         assert_eq!(engine.data.history[0].note, "Старая заметка");
 
