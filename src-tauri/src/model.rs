@@ -90,6 +90,20 @@ pub struct ActivityDetails {
     pub color: ActivityColor,
 }
 
+pub const PRIORITY_GOAL_LIMIT: usize = 3;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PriorityGoal {
+    pub activity: u64,
+    pub goal: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GoalRename {
+    pub from: String,
+    pub to: String,
+}
+
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ActivityIcon {
@@ -214,6 +228,8 @@ pub struct Data {
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
     pub activities: Vec<Activity>,
+    #[serde(default)]
+    pub priority_goals: Vec<PriorityGoal>,
     pub games: Vec<Game>,
     #[serde(default)]
     pub game_sessions: Vec<GameSession>,
@@ -257,6 +273,7 @@ impl Default for Data {
                 archived: false,
             })
             .collect(),
+            priority_goals: Vec::new(),
             games: Vec::new(),
             game_sessions: Vec::new(),
             game_monitoring: Vec::new(),
@@ -276,6 +293,7 @@ impl Data {
             settings: self.settings.clone(),
             auto_update: self.auto_update,
             activities: self.activities.clone(),
+            priority_goals: self.priority_goals.clone(),
             games: self.games.clone(),
             game_sessions: Vec::new(),
             game_monitoring: Vec::new(),
@@ -303,6 +321,20 @@ impl Data {
             .iter_mut()
             .find(|activity| activity.id == id)
             .ok_or_else(|| "Занятие не найдено.".into())
+    }
+
+    pub fn has_active_goal(activities: &[Activity], priority: &PriorityGoal) -> bool {
+        activities.iter().any(|activity| {
+            activity.id == priority.activity
+                && !activity.archived
+                && activity.details.goals_enabled
+                && activity.details.goals.contains(&priority.goal)
+        })
+    }
+
+    pub fn retain_active_priorities(&mut self) {
+        self.priority_goals
+            .retain(|priority| Self::has_active_goal(&self.activities, priority));
     }
 
     pub fn validate_activity(

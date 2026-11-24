@@ -1,5 +1,5 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
-import { canBlockGame, dateKey, minecraftJava, recordedSeconds, type Action, type GameReport, type GameSession, type HistoryPage, type Session, type Snapshot } from './types'
+import { canBlockGame, dateKey, minecraftJava, priorityGoalLimit, recordedSeconds, samePriorityGoal, type Action, type GameReport, type GameSession, type HistoryPage, type PriorityGoal, type Session, type Snapshot } from './types'
 import type { UpdateStatus } from './desktop'
 import updateFixture from '../fixtures/ipc-update-status.json'
 import { version } from '../package.json'
@@ -52,9 +52,22 @@ export function installPreview() {
       { id: 1, name: 'Личный проект', icon: 'target', color: 'violet', archived: false },
       { id: 2, name: 'Чтение', icon: 'book', color: 'green', archived: false },
     ],
-    activitySummaries: {}, games: [], active: null, elapsed: 0,
+    priorityGoals: [], activitySummaries: {}, games: [], active: null, elapsed: 0,
     failures: {}, blockedCount: 0, report: null, runningGames: [], gameRevision: null, gameEarliest: null, workRevision: 0,
     gameIcons: null, awards: {}, achievementProgress: null,
+  }
+  if (scenario === 'priorities') {
+    data.activities[0].goalsEnabled = true
+    data.activities[0].goals = ['Собрать первый прототип', 'Набросать план презентации']
+    data.activities[1].goalsEnabled = true
+    data.activities[1].goals = ['Дочитать главу о привычках', 'Выписать три идеи из книги']
+    data.activities.push({ id: 3, name: 'Английский', icon: 'languages', color: 'blue', archived: false,
+      goalsEnabled: true, goals: ['Подготовить вопросы к разговорному клубу'] })
+    data.priorityGoals = [
+      { activity: 1, goal: 'Собрать первый прототип' },
+      { activity: 3, goal: 'Подготовить вопросы к разговорному клубу' },
+      { activity: 2, goal: 'Дочитать главу о привычках' },
+    ]
   }
   if (scenario === 'demo' || scenario === 'archive') {
     data.activities.push({ id: 3, name: 'Старый проект', icon: 'briefcase', color: 'blue', archived: true })
@@ -142,6 +155,10 @@ export function installPreview() {
     session.running = null
   }
 
+  const hasActiveGoal = (goal: PriorityGoal) => data.activities.some(item =>
+    item.id === goal.activity && !item.archived && item.goalsEnabled && item.goals?.includes(goal.goal))
+  const retainPriorities = () => { data.priorityGoals = data.priorityGoals.filter(hasActiveGoal) }
+
   function apply(action: Action) {
     const time = now()
     const session = data.active
@@ -162,6 +179,7 @@ export function installPreview() {
         session.completedGoals = [...(action.completedGoals ?? [])]
         const activity = data.activities.find(a => a.id === session.activity)
         if (activity) activity.goals = activity.goals?.filter(g => !session.completedGoals!.includes(g))
+        retainPriorities()
         history.push({ ...session, finished: time, note: action.note })
         data.active = null
         break
@@ -187,6 +205,22 @@ export function installPreview() {
         data.activities = data.activities.map(item => item.id === action.id
           ? { ...item, ...(action.type === 'editActivity' ? action.details : { archived: action.archived }) }
           : item)
+        if (action.type === 'editActivity' && action.goalRenames?.length) {
+          const renames = action.goalRenames
+          data.priorityGoals = data.priorityGoals.map(goal => {
+            if (goal.activity !== action.id) return goal
+            const rename = renames.find(item => item.from === goal.goal)
+            return { ...goal, goal: rename?.to ?? (renames.some(item => item.to === goal.goal) ? '' : goal.goal) }
+          })
+        }
+        retainPriorities()
+        break
+      case 'setPriorityGoals':
+        if (action.goals.length > priorityGoalLimit) throw new Error('Можно выбрать до трёх ближайших целей.')
+        if (action.goals.some((goal, index) => !hasActiveGoal(goal) || action.goals.slice(0, index).some(item => samePriorityGoal(item, goal)))) {
+          throw new Error('Список целей изменился. Проверьте выбранные цели.')
+        }
+        data.priorityGoals = action.goals
         break
       case 'saveSettings':
         data.settings = action.settings

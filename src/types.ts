@@ -2,6 +2,10 @@ export type ActivityIcon = 'sparkles' | 'briefcase' | 'book' | 'code' | 'pencil'
 export type ActivityColor = 'violet' | 'blue' | 'cyan' | 'green' | 'amber' | 'orange' | 'rose' | 'slate'
 export type ActivityDetails = { goalsEnabled?: boolean; goals?: string[]; name: string; icon: ActivityIcon; color: ActivityColor }
 export type Activity = ActivityDetails & { id: number; archived: boolean }
+export type PriorityGoal = { activity: number; goal: string }
+export type GoalRename = { from: string; to: string }
+export const priorityGoalLimit = 3
+export const samePriorityGoal = (a: PriorityGoal, b: PriorityGoal) => a.activity === b.activity && a.goal === b.goal
 export type ActivitySummaries = Record<number, { seconds: number; lastActive: number }>
 export type Game = { path: string; name: string; source: string; catalog_id: string; aliases: string[]; excluded: boolean; shortcut?: string }
 export const minecraftJava = 'minecraft:java'
@@ -17,6 +21,7 @@ export type GameReport = HistoryPage<GameSession> & { totals: Record<string, Gam
 export type Snapshot = {
   date: string; seconds: number; phase: number; target: number; locked: boolean; settings: Settings
   activities: Activity[]; activitySummaries: ActivitySummaries; games: Game[]; active: Session | null; elapsed: number
+  priorityGoals: PriorityGoal[]
   failures: Record<string, string>; blockedCount: number; report: Report | null
   runningGames: string[]; gameRevision: number | null; gameEarliest: number | null; workRevision: number
   gameIcons: Record<string, GameIconStatus> | null
@@ -29,8 +34,9 @@ export type Action =
   | { type: 'finish'; note: string; completedGoals?: string[] }
   | { type: 'shortenSession'; id: number; seconds: number }
   | { type: 'addActivity'; details: ActivityDetails }
-  | { type: 'editActivity'; id: number; details: ActivityDetails }
+  | { type: 'editActivity'; id: number; details: ActivityDetails; goalRenames?: GoalRename[] }
   | { type: 'archiveActivity'; id: number; archived: boolean }
+  | { type: 'setPriorityGoals'; goals: PriorityGoal[] }
   | { type: 'addGame' | 'removeGame'; path: string }
   | { type: 'excludeGame'; path: string; excluded: boolean }
   | { type: 'saveSettings'; settings: Settings }

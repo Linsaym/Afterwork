@@ -2,9 +2,9 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Form
 import { HistoryNavigation } from './history'
 import {
   Archive, BookOpen, Brain, BriefcaseBusiness, Check, ChevronDown, CodeXml, Dumbbell, Heart,
-  Flag, Languages, Layers, Music, Palette, Pencil, Plus, RotateCcw, Search, Sparkles, Target, Trash2, X,
+  Flag, Languages, Layers, Music, Palette, Pencil, Pin, Plus, RotateCcw, Search, Sparkles, Target, Trash2, X,
 } from 'lucide-react'
-import { duration, type Activity, type ActivityDetails, type ActivityIcon, type ActivityColor, type ActivitySummaries } from './types'
+import { duration, type Activity, type ActivityDetails, type ActivityIcon, type ActivityColor, type ActivitySummaries, type GoalRename, type PriorityGoal } from './types'
 
 const icons = {
   sparkles: [Sparkles, 'Искры'], briefcase: [BriefcaseBusiness, 'Портфель'], book: [BookOpen, 'Книга'],
@@ -145,24 +145,26 @@ export function ActivityPicker({ activities, summaries, selected, disabled, choo
   </div>
 }
 
-export function ActivityEditor({ activity, initialName, error, busy, close, save }: {
-  activity?: Activity; initialName: string; error: string; busy: boolean
-  close: () => void; save: (details: ActivityDetails) => void
+export function ActivityEditor({ activity, initialName, goalSetup, error, busy, close, save }: {
+  activity?: Activity; initialName: string; goalSetup?: boolean; error: string; busy: boolean
+  close: () => void; save: (details: ActivityDetails, goalRenames: GoalRename[]) => void
 }) {
-  const [details, setDetails] = useState<ActivityDetails>({ goalsEnabled: activity?.goalsEnabled ?? false, goals: activity?.goals ?? [], name: activity?.name ?? initialName, icon: activity?.icon ?? 'sparkles', color: activity?.color ?? 'violet' })
-  const [draft, setDraft] = useState<{ index: number | null; name: string }>()
+  const [details, setDetails] = useState<ActivityDetails>({ goalsEnabled: goalSetup || (activity?.goalsEnabled ?? false), name: activity?.name ?? initialName, icon: activity?.icon ?? 'sparkles', color: activity?.color ?? 'violet' })
+  const [goals, setGoals] = useState<{ name: string; original?: string }[]>(() => (activity?.goals ?? []).map(name => ({ name, original: name })))
+  const [draft, setDraft] = useState<{ index: number | null; name: string } | undefined>(
+    goalSetup && goals.length < maxGoals ? { index: null, name: '' } : undefined,
+  )
   const addGoal = useRef<HTMLButtonElement>(null)
   const editButtons = useRef(new Map<number, HTMLButtonElement>())
   const draftErrorId = useId()
-  const goals = details.goals ?? []
   const draftName = draft?.name.trim() ?? ''
-  const duplicate = goals.some((goal, index) => goal === draftName && index !== draft?.index)
+  const duplicate = goals.some((goal, index) => goal.name === draftName && index !== draft?.index)
   const validDraft = !!draftName && !duplicate
 
   function updatedGoals() {
     if (!draft) return goals
-    if (draft.index === null) return [...goals, draftName]
-    return goals.map((goal, index) => index === draft.index ? draftName : goal)
+    if (draft.index === null) return [...goals, { name: draftName }]
+    return goals.map((goal, index) => index === draft.index ? { ...goal, name: draftName } : goal)
   }
 
   function closeDraft() {
@@ -177,16 +179,39 @@ export function ActivityEditor({ activity, initialName, error, busy, close, save
 
   function commitDraft() {
     if (!validDraft || busy) return
-    setDetails({ ...details, goals: updatedGoals() })
+    setGoals(updatedGoals())
     closeDraft()
   }
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (!busy && details.name.trim() && (!draft || validDraft)) {
-      save({ ...details, goals: updatedGoals() })
+      const updated = updatedGoals()
+      save({ ...details, goals: updated.map(goal => goal.name) }, updated.flatMap(({ original, name }) =>
+        original !== undefined && original !== name ? [{ from: original, to: name }] : []))
     }
   }
+
+  if (goalSetup) return <form className="activity-editor" onSubmit={submit}>
+    <div className="dialog-heading"><ActivityMark activity={details} big /><div>
+      <h2>{draft ? 'Добавить цель' : 'Включить цели'}</h2>
+      {activity && <p>{activity.name}</p>}
+    </div></div>
+    <div className="dialog-body">
+      {!activity && <label className="field">Название занятия<input autoFocus required maxLength={60}
+        value={details.name} placeholder="Например, английский" onChange={event => setDetails({ ...details, name: event.target.value })} /></label>}
+      {draft ? <label className="field">Название цели<input autoFocus={!!activity} required maxLength={maxGoalLength}
+        value={draft.name} placeholder="Например, прочитать первую главу" aria-invalid={duplicate || undefined}
+        aria-describedby={duplicate ? draftErrorId : undefined} onChange={event => setDraft({ ...draft, name: event.target.value })} /></label>
+        : <p>В этом занятии уже есть {maxGoals} целей. Включите их, чтобы выбрать ближайшие.</p>}
+      {duplicate && <p className="error" id={draftErrorId} role="alert">Такая цель уже есть в занятии.</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+    </div>
+    <div className="dialog-actions">
+      <button type="button" className="button secondary" disabled={busy} onClick={close}>Назад</button>
+      <button className="button primary" disabled={busy || !details.name.trim() || (!!draft && !validDraft)}>{draft ? 'Сохранить цель' : 'Включить цели'}</button>
+    </div>
+  </form>
 
   const nameEditor = draft && <div className="goal-name-editor">
     <div className="goal-name-controls">
@@ -229,7 +254,7 @@ export function ActivityEditor({ activity, initialName, error, busy, close, save
         </div>
         {details.goalsEnabled && <div className="goal-management-body">
           {goals.length > 0 && <ul className="goal-editor-list" aria-label="Активные цели">
-            {goals.map((goal, index) => <li key={goal} className="goal-editor-row">
+            {goals.map(({ name: goal }, index) => <li key={goal} className="goal-editor-row">
               {draft?.index === index ? nameEditor : <>
                 <button type="button" className="goal-rename" title="Переименовать цель" aria-label={`Переименовать цель «${goal}»`}
                   ref={element => { if (element) editButtons.current.set(index, element); else editButtons.current.delete(index) }}
@@ -238,7 +263,7 @@ export function ActivityEditor({ activity, initialName, error, busy, close, save
                 </button>
                 <button type="button" className="goal-icon goal-remove" title="Удалить цель" aria-label={`Удалить цель «${goal}»`}
                   disabled={busy || !!draft} onClick={() => {
-                    setDetails({ ...details, goals: goals.filter((_, position) => position !== index) })
+                    setGoals(goals.filter((_, position) => position !== index))
                     requestAnimationFrame(() => (editButtons.current.get(index) ?? addGoal.current)?.focus())
                   }}><Trash2 size={15} /></button>
               </>}
@@ -263,9 +288,10 @@ function ActivityGoalSummary({ goals }: { goals: string[] }) {
   </details>
 }
 
-export function Activities({ activities, summaries, busy, create, edit, archive }: {
-  activities: Activity[]; summaries: ActivitySummaries; busy: boolean
+export function Activities({ activities, summaries, priorities, busy, create, edit, archive, prioritize }: {
+  activities: Activity[]; summaries: ActivitySummaries; priorities: PriorityGoal[]; busy: boolean
   create: () => void; edit: (activity: Activity) => void; archive: (activity: Activity) => void
+  prioritize: (activity: Activity, trigger: HTMLButtonElement) => void
 }) {
   const [archived, setArchived] = useState(false)
   const [query, setQuery] = useState('')
@@ -295,6 +321,7 @@ export function Activities({ activities, summaries, busy, create, edit, archive 
             const last = summary ? dateTime.format(new Date(summary.lastActive * 1000)) : 'Ещё не было'
             const ArchiveIcon = item.archived ? RotateCcw : Archive
             const archiveLabel = item.archived ? 'Восстановить' : 'В архив'
+            const hasPriorities = priorities.some(priority => priority.activity === item.id)
             return <li className="activity-grid activity-row" key={item.id}>
               <div className="activity-name" data-color={item.color}>
                 <ActivityMark activity={item} big />
@@ -302,7 +329,10 @@ export function Activities({ activities, summaries, busy, create, edit, archive 
               </div>
               <span className="activity-total" aria-label={'Всего ' + duration(summary?.seconds ?? 0)}>{duration(summary?.seconds ?? 0)}</span>
               <span className="activity-last" aria-label={'Последняя активность: ' + last}>{last}</span>
-              <div className="activity-row-actions"><button className="icon-button" disabled={busy} title="Редактировать" aria-label={'Редактировать «' + item.name + '»'} onClick={() => edit(item)}><Pencil size={15} /></button>
+              <div className="activity-row-actions">
+                {!item.archived && <button className="button secondary activity-prioritize" data-pinned={hasPriorities} disabled={busy}
+                  aria-label={'Ближайшие цели из занятия «' + item.name + '»'} onClick={event => prioritize(item, event.currentTarget)}><Pin size={15} fill={hasPriorities ? 'currentColor' : 'none'} />Ближайшие цели</button>}
+                <button className="icon-button" disabled={busy} title="Редактировать" aria-label={'Редактировать «' + item.name + '»'} onClick={() => edit(item)}><Pencil size={15} /></button>
                 <button className="button secondary archive-button" disabled={busy} title={archiveLabel} aria-label={archiveLabel + ' «' + item.name + '»'} onClick={() => archive(item)}><ArchiveIcon size={15} /><span>{archiveLabel}</span></button></div>
             </li>
           })}

@@ -178,6 +178,7 @@ impl Engine {
                 | Action::Finish { .. }
                 | Action::EditActivity { .. }
                 | Action::ArchiveActivity { .. }
+                | Action::SetPriorityGoals { .. }
         );
         let finished = matches!(&action, Action::Finish { .. });
         let games_changed = matches!(
@@ -366,6 +367,7 @@ struct Snapshot {
     locked: bool,
     settings: Settings,
     activities: Vec<model::Activity>,
+    priority_goals: Vec<model::PriorityGoal>,
     activity_summaries: BTreeMap<u64, ActivitySummary>,
     games: Vec<Game>,
     active: Option<Session>,
@@ -465,6 +467,7 @@ fn make_snapshot(
         locked: status.locked(),
         settings: data.settings.clone(),
         activities: data.activities.clone(),
+        priority_goals: data.priority_goals.clone(),
         activity_summaries: engine.work.summaries(data, now),
         games: data.games.clone(),
         active: data.active.clone(),
@@ -811,6 +814,129 @@ mod tests {
         assert_eq!(totals.activities[&7], 260);
         assert_eq!(totals.days[&date.pred_opt().unwrap()], 60);
         assert_eq!(totals.days[&date], 120);
+    }
+
+    #[test]
+    fn priorities_keep_order_and_follow_goal_lifecycle_after_legacy_import() {
+        use model::{GoalRename, PriorityGoal};
+
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("afterwork.json"),
+            include_str!("../../fixtures/legacy-afterwork.json"),
+        )
+        .unwrap();
+        let mut engine = Engine::load(dir.path().to_owned()).unwrap();
+        assert!(engine.data.priority_goals.is_empty());
+        let now = model::boundary(NaiveDate::from_ymd_opt(2025, 1, 2).unwrap(), 360);
+        let mut details = engine.data.activities[0].details.clone();
+        details.goals_enabled = true;
+        details.goals = ["Глава", "Конспект", "Задачи"].map(str::to_owned).to_vec();
+        engine
+            .change_action(
+                Action::EditActivity {
+                    id: 7,
+                    details: details.clone(),
+                    goal_renames: vec![],
+                },
+                now,
+            )
+            .unwrap();
+        details.name = "Чтение".into();
+        engine
+            .change_action(Action::AddActivity { details }, now)
+            .unwrap();
+        let reading = engine.data.activities.last().unwrap().id;
+        let goal = |activity, name: &str| PriorityGoal {
+            activity,
+            goal: name.into(),
+        };
+        let priorities = vec![
+            goal(reading, "Глава"),
+            goal(7, "Конспект"),
+            goal(7, "Глава"),
+        ];
+        engine
+            .change_action(
+                Action::SetPriorityGoals {
+                    goals: priorities.clone(),
+                },
+                now,
+            )
+            .unwrap();
+        for invalid in [
+            vec![priorities[0].clone(), priorities[0].clone()],
+            vec![goal(7, "Несуществующая цель")],
+            [priorities.as_slice(), &[goal(7, "Задачи")]].concat(),
+        ] {
+            assert!(engine
+                .change_action(Action::SetPriorityGoals { goals: invalid }, now)
+                .is_err());
+        }
+        drop(engine);
+        let mut engine = Engine::load(dir.path().to_owned()).unwrap();
+        assert_eq!(engine.data.priority_goals, priorities);
+        assert_eq!(engine.data.history[0].note, "Старая заметка");
+
+        let mut details = engine.data.activities[0].details.clone();
+        details.goals[1] = "Подробный конспект".into();
+        engine
+            .change_action(
+                Action::EditActivity {
+                    id: 7,
+                    details,
+                    goal_renames: vec![GoalRename {
+                        from: "Конспект".into(),
+                        to: "Подробный конспект".into(),
+                    }],
+                },
+                now,
+            )
+            .unwrap();
+        engine
+            .change_action(
+                Action::ArchiveActivity {
+                    id: reading,
+                    archived: true,
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            engine.data.priority_goals,
+            [goal(7, "Подробный конспект"), goal(7, "Глава")]
+        );
+
+        engine
+            .change_action(Action::Start { activity: 7 }, now)
+            .unwrap();
+        engine
+            .change_action(
+                Action::Finish {
+                    note: String::new(),
+                    completed_goals: vec!["Глава".into()],
+                },
+                now + 60,
+            )
+            .unwrap();
+        assert_eq!(
+            engine.data.history.last().unwrap().completed_goals,
+            ["Глава"]
+        );
+        assert_eq!(engine.data.priority_goals, [goal(7, "Подробный конспект")]);
+        let mut details = engine.data.activities[0].details.clone();
+        details.goals_enabled = false;
+        engine
+            .change_action(
+                Action::EditActivity {
+                    id: 7,
+                    details,
+                    goal_renames: vec![],
+                },
+                now + 60,
+            )
+            .unwrap();
+        assert!(engine.data.priority_goals.is_empty());
     }
 
     #[test]

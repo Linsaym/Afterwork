@@ -1,6 +1,6 @@
 {
   "name": "afterwork",
-  "version": "0.7.12",
+  "version": "0.8.0",
   "scripts": {
     "dev": "vite",
     "dev:preview": "vite --mode preview --port 1422",

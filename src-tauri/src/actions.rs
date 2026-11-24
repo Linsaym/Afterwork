@@ -1,6 +1,9 @@
 use crate::{
     achievements, game_tracking,
-    model::{Activity, ActivityDetails, Data, Game, Session, Settings, Timestamp},
+    model::{
+        Activity, ActivityDetails, Data, Game, GoalRename, PriorityGoal, Session, Settings,
+        Timestamp, PRIORITY_GOAL_LIMIT,
+    },
     CommandResult,
 };
 use serde::{Deserialize, Serialize};
@@ -30,10 +33,15 @@ pub enum Action {
     EditActivity {
         id: u64,
         details: ActivityDetails,
+        #[serde(default, rename = "goalRenames", skip_serializing_if = "Vec::is_empty")]
+        goal_renames: Vec<GoalRename>,
     },
     ArchiveActivity {
         id: u64,
         archived: bool,
+    },
+    SetPriorityGoals {
+        goals: Vec<PriorityGoal>,
     },
     AddGame {
         path: String,
@@ -109,6 +117,7 @@ pub fn apply(data: &mut Data, action: Action, now: Timestamp) -> CommandResult<(
                 .details
                 .goals
                 .retain(|g| !completed_goals.contains(g));
+            data.retain_active_priorities();
             let mut session = data.active.take().ok_or("Текущая сессия отсутствует.")?;
             session.pause(now);
             session.note = note.trim().into();
@@ -143,11 +152,56 @@ pub fn apply(data: &mut Data, action: Action, now: Timestamp) -> CommandResult<(
                 archived: false,
             });
         }
-        Action::EditActivity { id, details } => {
+        Action::EditActivity {
+            id,
+            details,
+            goal_renames,
+        } => {
             let details = data.validate_activity(details, Some(id))?;
+            let current = &data.activity_mut(id)?.details;
+            for (index, rename) in goal_renames.iter().enumerate() {
+                if !current.goals.contains(&rename.from)
+                    || !details.goals.contains(&rename.to)
+                    || goal_renames[..index]
+                        .iter()
+                        .any(|other| other.from == rename.from || other.to == rename.to)
+                {
+                    return Err("Список целей изменился. Откройте занятие заново.".into());
+                }
+            }
+            for priority in data
+                .priority_goals
+                .iter_mut()
+                .filter(|goal| goal.activity == id)
+            {
+                if let Some(rename) = goal_renames
+                    .iter()
+                    .find(|rename| rename.from == priority.goal)
+                {
+                    priority.goal.clone_from(&rename.to);
+                } else if goal_renames.iter().any(|rename| rename.to == priority.goal) {
+                    // The original goal with this name was deleted before another took its name.
+                    priority.goal.clear();
+                }
+            }
             data.activity_mut(id)?.details = details;
+            data.retain_active_priorities();
         }
-        Action::ArchiveActivity { id, archived } => data.activity_mut(id)?.archived = archived,
+        Action::ArchiveActivity { id, archived } => {
+            data.activity_mut(id)?.archived = archived;
+            data.retain_active_priorities();
+        }
+        Action::SetPriorityGoals { goals } => {
+            if goals.len() > PRIORITY_GOAL_LIMIT {
+                return Err("Можно выбрать до трёх ближайших целей.".into());
+            }
+            for (index, goal) in goals.iter().enumerate() {
+                if goals[..index].contains(goal) || !Data::has_active_goal(&data.activities, goal) {
+                    return Err("Список целей изменился. Проверьте выбранные цели.".into());
+                }
+            }
+            data.priority_goals = goals;
+        }
         Action::AddGame { path, shortcut } => {
             if data
                 .games
@@ -252,7 +306,16 @@ mod tests {
         assert!(!details.goals_enabled);
         details.goals_enabled = true;
         details.goals = vec!["First".into(), "Second".into(), "Later".into()];
-        apply(&mut data, Action::EditActivity { id, details }, 100).unwrap();
+        apply(
+            &mut data,
+            Action::EditActivity {
+                id,
+                details,
+                goal_renames: Vec::new(),
+            },
+            100,
+        )
+        .unwrap();
         data.active = None;
         apply(&mut data, Action::Start { activity: id }, 100).unwrap();
         assert!(apply(
@@ -278,7 +341,16 @@ mod tests {
         let mut details = data.activities[0].details.clone();
         details.goals.clear();
         details.goals_enabled = false;
-        apply(&mut data, Action::EditActivity { id, details }, 130).unwrap();
+        apply(
+            &mut data,
+            Action::EditActivity {
+                id,
+                details,
+                goal_renames: Vec::new(),
+            },
+            130,
+        )
+        .unwrap();
         let dir = std::env::temp_dir().join(format!("afterwork-goals-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("data.json");

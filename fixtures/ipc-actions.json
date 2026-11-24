@@ -40,14 +40,24 @@
       "name": "Тест",
       "icon": "target",
       "color": "green",
-      "goalsEnabled": false,
-      "goals": []
-    }
+      "goalsEnabled": true,
+      "goals": ["Прочитать вторую главу"]
+    },
+    "goalRenames": [
+      { "from": "Прочитать главу", "to": "Прочитать вторую главу" }
+    ]
   },
   {
     "type": "archiveActivity",
     "id": 7,
     "archived": true
+  },
+  {
+    "type": "setPriorityGoals",
+    "goals": [
+      { "activity": 7, "goal": "Прочитать главу" },
+      { "activity": 8, "goal": "Подготовить план" }
+    ]
   },
   {
     "type": "addGame",

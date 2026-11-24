@@ -6,7 +6,7 @@
     "devUrl": "http://localhost:1421"
   },
   "app": {
-    "windows": [{ "label": "main", "title": "Afterwork Dev", "width": 1220, "height": 860, "minWidth": 760, "minHeight": 580, "visible": false, "decorations": false, "backgroundColor": "#0e0f15" }]
+    "windows": [{ "label": "main", "title": "Afterwork Dev", "width": 1248, "height": 860, "minWidth": 1248, "minHeight": 818, "visible": false, "decorations": false, "backgroundColor": "#0e0f15" }]
   },
   "bundle": { "active": false }
 }

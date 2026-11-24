@@ -12,14 +12,16 @@ import '@fontsource-variable/manrope'
 import '@fontsource/jetbrains-mono/500.css'
 import './style.css'
 import './activities.css'
+import './priorities.css'
 import './games.css'
 import './achievements.css'
 import { Activities, ActivityEditor, ActivityPicker } from './activities'
 import { Achievements, AchievementUnlock } from './achievements'
 import { GameIcon, Games } from './games'
+import { PriorityEditor, PriorityGoals } from './priorities'
 import { Statistics } from './statistics'
 import { UpdateSettings, useUpdates } from './updates'
-import { canBlockGame, clock, dateOf, stopwatch, type Action, type Activity, type ActivityDetails, type Game, type Settings, type Snapshot } from './types'
+import { canBlockGame, clock, dateOf, stopwatch, type Action, type Activity, type ActivityDetails, type Game, type GoalRename, type Settings, type Snapshot } from './types'
 
 const pages = [
   { id: 'home', label: 'Главная', icon: LayoutGrid },
@@ -30,7 +32,8 @@ const pages = [
   { id: 'settings', label: 'Настройки', icon: Settings2 },
 ] as const
 type Page = typeof pages[number]['id']
-type Modal = { type: 'activity'; activity?: Activity; initialName: string; selectNew?: boolean } | { type: 'finish' } | { type: 'remove' | 'icon'; game: Game }
+type Modal = { type: 'activity'; activity?: Activity; initialName: string; selectNew?: boolean; goalSetup?: { activityId?: number } }
+  | { type: 'priorities'; activityId?: number; focusGoal?: string } | { type: 'finish' } | { type: 'remove' | 'icon'; game: Game }
 const todayFormat = new Intl.DateTimeFormat('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })
 
 function reconcileSnapshot(previous: Snapshot | undefined, next: Snapshot) {
@@ -56,6 +59,13 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [modal, setModal] = useState<Modal>()
+  const prioritiesTrigger = useRef<HTMLButtonElement>(null)
+  useLayoutEffect(() => {
+    if (!modal && !busy && prioritiesTrigger.current) {
+      prioritiesTrigger.current.focus()
+      prioritiesTrigger.current = null
+    }
+  }, [busy, modal])
   const [completedGoals, setCompletedGoals] = useState<string[]>([])
   const [text, setText] = useState('')
   const [newAwards, setNewAwards] = useState<string[]>([])
@@ -124,7 +134,15 @@ function App() {
     return refresh()
   }
   const showModal = (value: Modal) => { setCompletedGoals([]); setText(''); setError(''); setModal(value) }
-  const closeModal = () => { if (!busy) { setModal(undefined); setError('') } }
+  const openPriorities = (trigger: HTMLButtonElement, activityId?: number) => {
+    prioritiesTrigger.current = trigger
+    showModal({ type: 'priorities', activityId })
+  }
+  const closeModal = () => {
+    if (busy) return
+    setModal(modal?.type === 'activity' && modal.goalSetup ? { type: 'priorities', ...modal.goalSetup } : undefined)
+    setError('')
+  }
   const updateGameIcon = (game: Game, reset = false) => void perform(async () => {
     const file = reset ? null : await desktop.chooseIcon()
     if (!reset && typeof file !== 'string') return
@@ -132,12 +150,14 @@ function App() {
     await refresh()
     setModal(undefined)
   })
-  const saveActivity = (details: ActivityDetails) => {
+  const saveActivity = (details: ActivityDetails, goalRenames: GoalRename[]) => {
     if (modal?.type !== 'activity') return
     void perform(async () => {
-      const next = await apply(modal.activity ? { type: 'editActivity', id: modal.activity.id, details } : { type: 'addActivity', details })
+      const next = await apply(modal.activity ? { type: 'editActivity', id: modal.activity.id, details, goalRenames } : { type: 'addActivity', details })
       if (modal.selectNew) setSelection(next?.activities.at(-1)?.id)
-      setModal(undefined)
+      setModal(modal.goalSetup ? {
+        type: 'priorities', activityId: modal.activity?.id ?? next?.activities.at(-1)?.id, focusGoal: details.goals?.at(-1),
+      } : undefined)
     })
   }
   const submitModal = (event: FormEvent) => {
@@ -179,8 +199,9 @@ function App() {
           {updateStatus.phase === 'ready' && <button className="button" disabled={busy || !!modal} onClick={confirmUpdate}>Перезапустить и установить</button>}
         </div>}
         {!data ? <div className="loading">{error || 'Загрузка Afterwork…'}</div> : <>
-          {page === 'home' && <Home data={data} busy={busy} selection={selection} select={setSelection} run={action => void perform(async () => { await apply(action) })} add={initialName => showModal({ type: 'activity', initialName, selectNew: true })} finish={() => showModal({ type: 'finish' })} games={() => setPage('games')} />}
-          {page === 'activities' && <Activities activities={data.activities} summaries={data.activitySummaries} busy={busy}
+          {page === 'home' && <Home data={data} busy={busy} selection={selection} select={setSelection} run={action => void perform(async () => { await apply(action) })} add={initialName => showModal({ type: 'activity', initialName, selectNew: true })} finish={() => showModal({ type: 'finish' })} games={() => setPage('games')} managePriorities={openPriorities} />}
+          {page === 'activities' && <Activities activities={data.activities} summaries={data.activitySummaries} priorities={data.priorityGoals} busy={busy}
+            prioritize={(activity, trigger) => openPriorities(trigger, activity.id)}
             create={() => showModal({ type: 'activity', initialName: '' })} edit={activity => showModal({ type: 'activity', activity, initialName: '' })}
             archive={activity => void perform(async () => {
               await apply({ type: 'archiveActivity', id: activity.id, archived: !activity.archived })
@@ -216,8 +237,14 @@ function App() {
     </Dialog>}
     {newAwards.length > 0 && <AchievementUnlock key={newAwards.join()} ids={newAwards} close={() => setNewAwards([])} open={() => { setPage('achievements'); setNewAwards([]) }} />}
     {error && data && !modal && <div role="alert" className="toast"><CircleAlert size={17} /><span>{error}</span><button aria-label="Закрыть сообщение" onClick={() => setError('')}><X size={16} /></button></div>}
-    {modal && <Dialog close={closeModal} label={modal.type === 'activity' ? (modal.activity ? 'Редактировать занятие' : 'Новое занятие') : modal.type === 'finish' ? 'Завершение сессии' : modal.type === 'icon' ? 'Иконка игры' : 'Удалить игру?'}>
-      {modal.type === 'activity' ? <ActivityEditor activity={modal.activity} initialName={modal.initialName} error={error} busy={busy} close={closeModal} save={saveActivity} /> : modal.type === 'icon' ? <div>
+    {modal && <Dialog key={modal.type} close={closeModal} className={modal.type === 'priorities' ? 'priority-dialog' : undefined}
+      label={modal.type === 'activity' ? (modal.goalSetup ? 'Настройка цели' : modal.activity ? 'Редактировать занятие' : 'Новое занятие') : modal.type === 'priorities' ? 'Ближайшие цели' : modal.type === 'finish' ? 'Завершение сессии' : modal.type === 'icon' ? 'Иконка игры' : 'Удалить игру?'}>
+      {modal.type === 'priorities' && data ? <PriorityEditor initial={data.priorityGoals} activities={data.activities} activityId={modal.activityId} focusGoal={modal.focusGoal}
+        busy={busy} error={error} close={closeModal}
+        save={goals => void perform(async () => { await apply({ type: 'setPriorityGoals', goals }); setModal(undefined) })}
+        addGoal={(activity, activityId) => showModal({ type: 'activity', activity, initialName: '', goalSetup: { activityId } })} />
+      : modal.type === 'activity' ? <ActivityEditor activity={modal.activity} initialName={modal.initialName} goalSetup={!!modal.goalSetup}
+        error={error} busy={busy} close={closeModal} save={saveActivity} /> : modal.type === 'icon' ? <div>
         <h2>Иконка игры</h2>
         <div className="game-icon-preview"><GameIcon path={modal.game.path} status={data?.gameIcons?.[modal.game.path]} large /><div><b>{modal.game.name}</b><small>{data?.gameIcons?.[modal.game.path]?.custom ? 'Своя иконка' : 'Автоматический выбор'}</small></div></div>
         <p>Поддерживаются PNG, JPG и ICO до 8 МБ.</p>
@@ -270,10 +297,12 @@ export function Heading({ title, subtitle, action }: { title: string; subtitle: 
   return <div className="heading"><div><h1>{title}</h1><p>{subtitle}</p></div>{action}</div>
 }
 
-function Home({ data, busy, selection, select, run, add, finish, games }: {
+function Home({ data, busy, selection, select, run, add, finish, games, managePriorities }: {
   data: Snapshot; busy: boolean; selection?: number; select: (id: number) => void
   run: (action: Action) => void; add: (name: string) => void; finish: () => void; games: () => void
+  managePriorities: (trigger: HTMLButtonElement) => void
 }) {
+  const startButton = useRef<HTMLButtonElement>(null)
   const running = data.active?.running != null
   const selected = data.activities.find(item => data.active ? item.id === data.active.activity : item.id === selection && !item.archived)
   const goals = selected?.goalsEnabled ? selected.goals ?? [] : []
@@ -287,6 +316,8 @@ function Home({ data, busy, selection, select, run, add, finish, games }: {
   const status = !tracked ? 'Нет игр под контролем' : !blockable ? 'Учёт игрового времени' : data.locked ? (hasFailures ? 'Блокировка с ограничениями' : 'Игры заблокированы') : 'Игры разблокированы'
   return <div className="page home">
     <Heading title="Время для важного" subtitle="Запускайте фокус-сессии и следите за дневной целью." action={<span className="date-chip"><Clock3 size={15} /><span>{todayFormat.format(dateOf(data.date))}</span></span>} />
+    <PriorityGoals goals={data.priorityGoals} activities={data.activities} busy={busy} sessionActive={!!data.active} manage={managePriorities}
+      prepare={activity => { select(activity); requestAnimationFrame(() => startButton.current?.focus()) }} />
     <div className="hero-grid">
       <section className="panel timer-panel">
         <div className="card-heading timer-heading"><span className="card-icon"><Timer size={19} /></span><h2>Фокус-сессия</h2>
@@ -302,7 +333,7 @@ function Home({ data, busy, selection, select, run, add, finish, games }: {
             {data.active ? <>
               <button className="button primary" disabled={busy} onClick={() => run({ type: running ? 'pause' : 'resume' })}>{running ? <Pause size={17} /> : <Play size={17} />}{running ? 'Пауза' : 'Продолжить'}</button>
               <button className="button secondary" disabled={busy} onClick={finish}><Square size={14} />Завершить</button>
-            </> : <button className="button primary start" disabled={busy || !selected} onClick={() => selected && run({ type: 'start', activity: selected.id })}><Play size={17} fill="currentColor" />Начать сессию</button>}
+            </> : <button ref={startButton} className="button primary start" disabled={busy || !selected} onClick={() => selected && run({ type: 'start', activity: selected.id })}><Play size={17} fill="currentColor" />Начать сессию</button>}
           </div>
         </div>
       </section>
