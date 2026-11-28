@@ -47,7 +47,7 @@ export function installPreview() {
   const history: Session[] = []
   const data: Snapshot = {
     date: dateKey(new Date()), seconds: 0, phase: 1, target: 2700, locked: true,
-    settings: { first: 360, second: 960, minutes: 45, notifications: true, showPriorityGoals: true },
+    settings: { first: 360, second: 960, minutes: 45, notifications: true, showPriorityGoals: true, gameBlocking: true },
     activities: [
       { id: 1, name: 'Личный проект', icon: 'target', color: 'violet', archived: false },
       { id: 2, name: 'Чтение', icon: 'book', color: 'green', archived: false },
@@ -254,10 +254,11 @@ export function installPreview() {
         }
         const seconds = Object.values(summaries).reduce((sum, item) => sum + item.seconds, 0)
         const target = data.settings.minutes * 60
-        const locked = seconds < target
+        const locked = data.settings.gameBlocking && seconds < target
         return structuredClone({
           ...data, seconds, target, locked, activitySummaries: summaries,
           elapsed: data.active ? elapsed(data.active) : 0,
+          failures: data.settings.gameBlocking ? data.failures : {},
           blockedCount: locked && scenario !== 'error' ? data.games.filter(game => !game.excluded && canBlockGame(game)).length : 0,
           report: payload?.report ? { totals: {
             days: seconds ? { [data.date]: seconds } : {},

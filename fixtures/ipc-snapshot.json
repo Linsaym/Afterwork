@@ -9,7 +9,8 @@
     "second": 960,
     "minutes": 45,
     "notifications": true,
-    "showPriorityGoals": true
+    "showPriorityGoals": true,
+    "gameBlocking": true
   },
   "activities": [
     {

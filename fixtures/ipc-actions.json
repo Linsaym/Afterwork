@@ -79,7 +79,8 @@
       "second": 960,
       "minutes": 45,
       "notifications": false,
-      "showPriorityGoals": false
+      "showPriorityGoals": false,
+      "gameBlocking": false
     }
   }
 ]

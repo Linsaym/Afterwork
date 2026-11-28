@@ -315,6 +315,7 @@ pub fn contains_path(game: &Game, path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::Action;
     use std::{
         fs,
         process::{Command, Stdio},
@@ -401,6 +402,32 @@ mod tests {
         assert_eq!(engine.game_tracking.live.len(), 1);
         assert!(running.try_wait().unwrap().is_none());
         assert!(command("1").spawn().is_err());
+
+        let mut settings = engine.data.settings.clone();
+        settings.game_blocking = false;
+        engine
+            .change_action(Action::SaveSettings { settings }, now)
+            .unwrap();
+        engine.sync_locks(now, true);
+        assert!(engine.locks.is_empty());
+        assert!(engine.failures.is_empty());
+        assert_eq!(engine.game_tracking.live.len(), 1);
+        assert!(command("1").status().unwrap().success());
+        {
+            let mut reopened = Engine::load(directory.path().join("data")).unwrap();
+            assert!(!reopened.data.settings.game_blocking);
+            reopened.sync_locks_for_day(now, true, true);
+            assert!(reopened.locks.is_empty());
+        }
+
+        let mut settings = engine.data.settings.clone();
+        settings.game_blocking = true;
+        engine
+            .change_action(Action::SaveSettings { settings }, now)
+            .unwrap();
+        engine.sync_locks(now, true);
+        assert!(command("1").spawn().is_err());
+
         engine.observe_games(
             Sample {
                 discovered: Vec::new(),

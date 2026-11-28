@@ -164,7 +164,7 @@ export function Games({ data, busy, add, remove, exclude, editIcon }: { data: Sn
     </section>
     <section className="panel list-panel detected-games">
       <div className="game-report-head">
-        <div className="card-heading"><span className="card-icon"><Gamepad2 size={19} /></span><div><h2>Мои игры</h2><p>{data.games.length - excludedCount} отслеживается · {data.blockedCount} заблокировано</p></div></div>
+        <div className="card-heading"><span className="card-icon"><Gamepad2 size={19} /></span><div><h2>Мои игры</h2><p>{data.games.length - excludedCount} отслеживается{data.settings.gameBlocking && ` · ${data.blockedCount} заблокировано`}</p></div></div>
         <div className="activity-tabs" role="group" aria-label="Список игр"><button type="button" aria-pressed={!showExcluded} onClick={() => { setShowExcluded(false); setQuery(''); setCatalogPage(0) }}>Активные</button><button type="button" aria-pressed={showExcluded} onClick={() => { setShowExcluded(true); setQuery(''); setCatalogPage(0) }}>Исключения <small>{excludedCount}</small></button></div>
       </div>
       {games.length > 0 && <label className="activity-search game-search"><Search size={16} /><input aria-label="Поиск игр" placeholder="Поиск по названию…" value={query} onChange={event => { setQuery(event.target.value); setCatalogPage(0) }} /></label>}
@@ -186,7 +186,7 @@ export function Games({ data, busy, add, remove, exclude, editIcon }: { data: Sn
           </button>
           <div className="tracked-meta"><b>{duration(summary?.seconds ?? 0)}</b><small>{playing ? 'Сессия идёт' : summary ? dateTime.format(summary.latest * 1000) : 'Сессий пока нет'}</small></div>
           <span className={'game-lock-label' + (failure ? ' error' : '')}>
-            {game.excluded ? 'Исключена' : trackingOnly ? 'Только учёт времени' : blocked ? failure ? 'Блокировка неполная' : 'Заблокирована' : 'Доступна'}
+            {game.excluded ? 'Исключена' : trackingOnly || !data.settings.gameBlocking ? 'Только учёт времени' : blocked ? failure ? 'Блокировка неполная' : 'Заблокирована' : 'Доступна'}
             {failure && <small>{failure}</small>}
           </span>
           <GameActions game={game} busy={busy} statistics={() => statistics(game.path)} editIcon={editIcon} exclude={exclude} remove={remove} />
@@ -201,6 +201,6 @@ export function Games({ data, busy, add, remove, exclude, editIcon }: { data: Sn
       </div>)}</div> : <p className="empty-inline">{result?.error ?? (report ? 'За этот период нет игровых сессий.' : 'Загрузка истории…')}</p>}
       <HistoryNavigation page={historyPage} more={!!report?.more} change={setHistoryPage} />
     </section>
-    <div className="info-line"><ShieldCheck size={17} />Статистика хранится на этом компьютере. Блокировка применяется к новым запускам.</div>
+    <div className="info-line"><ShieldCheck size={17} />{data.settings.gameBlocking ? 'Статистика хранится на этом компьютере. Блокировка применяется к новым запускам.' : 'Статистика хранится на этом компьютере.'}</div>
   </div>
 }

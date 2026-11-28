@@ -34,11 +34,13 @@ pub struct Settings {
     pub second: u32,
     pub minutes: u32,
     pub notifications: bool,
-    #[serde(default = "default_show_priority_goals")]
+    #[serde(default = "enabled_by_default")]
     pub show_priority_goals: bool,
+    #[serde(default = "enabled_by_default")]
+    pub game_blocking: bool,
 }
 
-fn default_show_priority_goals() -> bool {
+fn enabled_by_default() -> bool {
     true
 }
 
@@ -49,7 +51,8 @@ impl Default for Settings {
             second: 960,
             minutes: 45,
             notifications: true,
-            show_priority_goals: default_show_priority_goals(),
+            show_priority_goals: true,
+            game_blocking: true,
         }
     }
 }

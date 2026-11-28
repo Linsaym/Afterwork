@@ -284,12 +284,12 @@ impl Engine {
     }
 
     fn sync_locks(&mut self, now: Timestamp, force: bool) {
-        let locked = !self.isolated && self.work.status(&self.data, now).locked();
+        let locked = self.work.status(&self.data, now).locked();
         self.sync_locks_for_day(now, force, locked);
     }
 
     fn sync_locks_for_day(&mut self, now: Timestamp, force: bool, locked: bool) {
-        if self.isolated || !locked {
+        if self.isolated || !self.data.settings.game_blocking || !locked {
             self.locks.clear();
             self.failures.clear();
             return;
@@ -464,7 +464,7 @@ fn make_snapshot(
         seconds: status.seconds,
         phase: status.phase,
         target: status.target,
-        locked: status.locked(),
+        locked: data.settings.game_blocking && status.locked(),
         settings: data.settings.clone(),
         activities: data.activities.clone(),
         priority_goals: data.priority_goals.clone(),
@@ -782,6 +782,7 @@ mod tests {
         let rollover = model::boundary(date, 360);
         let mut engine = Engine::load(dir.path().to_owned()).unwrap();
         assert!(engine.data.auto_update);
+        assert!(engine.data.settings.game_blocking);
         engine
             .update(|data| {
                 data.auto_update = false;
@@ -808,6 +809,7 @@ mod tests {
             .unwrap();
         let reopened = Engine::load(dir.path().to_owned()).unwrap();
         assert!(reopened.data.active.is_none());
+        assert!(reopened.data.settings.game_blocking);
         assert_eq!(reopened.data.history[0].note, "Старая заметка");
         assert_eq!(reopened.data.history[1].note, "Новая сессия");
         let totals = reopened.data.statistics(rollover + 120);

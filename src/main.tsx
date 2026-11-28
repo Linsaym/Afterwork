@@ -283,7 +283,7 @@ function App() {
               <textarea autoFocus={!finishGoals.length} rows={3} maxLength={2000} value={text} placeholder="Запишите результат сессии…" onChange={event => setText(event.target.value)} />
             </label>
           </>}
-          {modal.type === 'remove' && <p>Игра «{modal.game.name}» будет удалена из списка блокировки.</p>}
+          {modal.type === 'remove' && <p>Игра «{modal.game.name}» будет удалена из списка игр.</p>}
           {error && <p className="error" role="alert">{error}</p>}
         </div>
         <div className="dialog-actions"><button className="button secondary" type="button" disabled={busy} onClick={closeModal}>Отмена</button><button className={'button ' + (modal.type === 'remove' ? 'danger' : 'primary')} disabled={busy}>{modal.type === 'remove' ? 'Удалить' : 'Сохранить сессию'}</button></div>
@@ -357,11 +357,11 @@ function Home({ data, busy, selection, select, run, add, finish, games, managePr
       <summary><Flag size={17} /><strong>Цели занятия</strong><span>{goals.length}</span><ChevronDown size={16} className="session-goals-chevron" /></summary>
       <ul aria-label="Цели занятия" tabIndex={0}>{goals.map(goal => <li key={goal}>{goal}</li>)}</ul>
     </details>}
-    <section className={'panel unlock ' + (!data.locked && blockable ? 'unlocked' : '')}>
+    {settings.gameBlocking && <section className={'panel unlock ' + (!data.locked && blockable ? 'unlocked' : '')}>
       <span className="unlock-icon">{blockable && data.locked ? <LockKeyhole size={22} /> : blockable ? <ShieldCheck size={22} /> : <Gamepad2 size={22} />}</span>
       <div><h2>{status}</h2><p>{!tracked ? 'Afterwork добавляет распознанные игры в список автоматически.' : !blockable ? 'Игровые сессии сохраняются в разделе «Игры».' : hasFailures ? 'Проверьте состояние отдельных файлов в разделе «Игры».' : data.locked ? 'До разблокировки осталось ' + Math.ceil(left / 60) + ' мин работы.' : unlockedDay ? 'Дневная цель выполнена. Игры доступны до ' + clock(settings.first) + '.' : 'Игры доступны до ' + clock(settings.second) + '. Второй этап можно выполнить заранее.'}</p></div>
       <button className="button secondary unlock-button" onClick={games}>Мои игры <ArrowUpRight size={16} /></button>
-    </section>
+    </section>}
   </div>
 }
 
@@ -371,6 +371,7 @@ function Preferences({ initial, save, busy, reportError, updates }: { initial: S
   const [minutes, setMinutes] = useState(String(initial.minutes))
   const [notifications, setNotifications] = useState(initial.notifications)
   const [showPriorityGoals, setShowPriorityGoals] = useState(initial.showPriorityGoals)
+  const [gameBlocking, setGameBlocking] = useState(initial.gameBlocking)
   const [autostart, setAutostart] = useState<boolean | null>(null)
   const [changing, setChanging] = useState(false)
   useEffect(() => { desktop.autostart().then(setAutostart).catch(error => reportError(String(error))) }, [reportError])
@@ -382,10 +383,10 @@ function Preferences({ initial, save, busy, reportError, updates }: { initial: S
   }
   const parse = (time: string) => { const [hours, mins] = time.split(':').map(Number); return hours * 60 + mins }
   const dirty = first !== clock(initial.first) || second !== clock(initial.second) || Number(minutes) !== initial.minutes
-    || notifications !== initial.notifications || showPriorityGoals !== initial.showPriorityGoals
+    || notifications !== initial.notifications || showPriorityGoals !== initial.showPriorityGoals || gameBlocking !== initial.gameBlocking
   return <div className="page">
     <Heading title="Настройки" subtitle="Настройте расписание и поведение Afterwork." />
-    <form className="preferences" onSubmit={event => { event.preventDefault(); save({ first: parse(first), second: parse(second), minutes: Number(minutes), notifications, showPriorityGoals }) }}>
+    <form className="preferences" onSubmit={event => { event.preventDefault(); save({ first: parse(first), second: parse(second), minutes: Number(minutes), notifications, showPriorityGoals, gameBlocking }) }}>
       <section className="panel list-panel">
         <div className="card-heading"><span className="card-icon"><Clock3 size={19} /></span><div><h2>Расписание</h2><p>С началом первого этапа начинается новый день.</p></div></div>
         <div className="settings-grid">
@@ -393,6 +394,7 @@ function Preferences({ initial, save, busy, reportError, updates }: { initial: S
           <label className="field">Второй этап<input type="time" required value={second} onChange={event => setSecond(event.target.value)} /></label>
           <label className="field">Минут на этап<input required type="number" min={1} max={240} value={minutes} onChange={event => setMinutes(event.target.value)} /></label>
         </div>
+        <div className="setting-row"><div><b>Блокировка игр</b><p>Блокировать новые запуски до выполнения цели. Учёт игрового времени работает и без блокировки.</p></div><Toggle label="Блокировка игр" value={gameBlocking} disabled={busy} change={() => setGameBlocking(!gameBlocking)} /></div>
       </section>
       <section className="panel list-panel">
         <div className="card-heading"><span className="card-icon"><Bell size={19} /></span><div><h2>В фоне</h2><p>Уведомления и вход в Windows</p></div></div>
